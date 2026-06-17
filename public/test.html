@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Sockets y QR Baileys</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }
+        .qr-container img { max-width: 100%; border: 1px solid #ddd; border-radius: 4px; padding: 10px; margin-top: 10px; }
+        .status { margin-top: 10px; font-weight: bold; }
+        .conectado { color: green; }
+        .desconectado { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Visor de QRs (Socket.io)</h1>
+    <p>Escanea el código QR con tu WhatsApp para vincular la cuenta. Al conectarse, el estado cambiará en tiempo real.</p>
+    
+    <div class="grid" id="accounts-container">
+        <!-- QRs se inyectarán aquí -->
+    </div>
+
+    <script>
+        const socket = io('http://localhost:3000');
+        const container = document.getElementById('accounts-container');
+
+        socket.on('connect', () => {
+            console.log('Conectado al servidor Socket.io:', socket.id);
+        });
+
+        socket.on('qr_generated', (data) => {
+            const { accountId, qr } = data;
+            
+            let card = document.getElementById(`card-${accountId}`);
+            if (!card) {
+                card = document.createElement('div');
+                card.id = `card-${accountId}`;
+                card.className = 'card';
+                card.innerHTML = `
+                    <h3>Cuenta: ${accountId}</h3>
+                    <div class="qr-container"><img id="img-${accountId}" src="${qr}" alt="QR"></div>
+                    <div class="status" id="status-${accountId}">Esperando escaneo...</div>
+                `;
+                container.appendChild(card);
+            } else {
+                document.getElementById(`img-${accountId}`).src = qr;
+            }
+        });
+
+        socket.on('status_changed', (data) => {
+            const { accountId, status } = data;
+            const statusDiv = document.getElementById(`status-${accountId}`);
+            const imgDiv = document.getElementById(`img-${accountId}`);
+            
+            if (statusDiv) {
+                statusDiv.textContent = `Estado: ${status.toUpperCase()}`;
+                statusDiv.className = `status ${status}`;
+            }
+            if (imgDiv && status === 'conectado') {
+                imgDiv.style.display = 'none'; // Ocultar QR si ya se conectó
+            }
+        });
+    </script>
+</body>
+</html>
