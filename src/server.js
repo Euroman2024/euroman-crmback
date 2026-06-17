@@ -15,10 +15,15 @@ initSocket(server);
 const PORT =
   process.env.PORT || 3000;
 
-server.listen(PORT, () => {
+const whatsappService = require('./services/whatsapp.service');
+
+server.listen(PORT, async () => {
 
   console.log(
     `Server running on ${PORT}`
   );
+
+  // Iniciar todas las sesiones guardadas
+  await whatsappService.restoreSessions();
 
 });

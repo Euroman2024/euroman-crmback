@@ -11,6 +11,9 @@ app.use(cors());
 
 app.use(express.json());
 
+// Servir archivos estáticos para probar Sockets/QRs
+app.use(express.static('public'));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/socket', socketRoutes);

@@ -1,5 +1,7 @@
 const prisma = require("../config/prisma");
-
+const whatsappService = require("../services/whatsapp.service");
+const fs = require("fs");
+const path = require("path");
 // Obtener todas las cuentas
 const getAccounts = async (req, res) => {
   try {
@@ -62,9 +64,12 @@ const createAccount = async (req, res) => {
         data: {
           nombre,
           numero,
-          estado: "desconectado",
+          estado: "conectando",
         },
       });
+
+    // Iniciar sesión en Baileys
+    whatsappService.startSession(account.id);
 
     res.status(201).json(account);
 
@@ -119,6 +124,14 @@ const deleteAccount = async (req, res) => {
   try {
 
     const { id } = req.params;
+
+    // Detener sesión si existe y eliminar archivos
+    const sessionDir = path.join(__dirname, "..", "..", "sessions", id);
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+    // Delete from memory
+    whatsappService.sessions.delete(id);
 
     await prisma.whatsappAccount.delete({
       where: { id },
