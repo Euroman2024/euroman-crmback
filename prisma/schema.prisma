@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id        String   @id @default(uuid())
+  nombre    String
+  email     String   @unique
+  password  String
+  rol       RolUsuario
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversaciones Conversacion[] @relation("UsuarioConversaciones")
+}
+
+model WhatsappAccount {
+  id        String   @id @default(uuid())
+  nombre    String
+  numero    String?
+  estado    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversaciones Conversacion[]
+}
+
+model Contacto {
+  id        String   @id @default(uuid())
+  nombre    String?
+  telefono  String   @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversaciones Conversacion[]
+}
+
+model Conversacion {
+  id                String @id @default(uuid())
+
+  contactoId        String
+  whatsappAccountId String
+  asignadoA         String?
+
+  estado EstadoConversacion @default(nuevo)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contacto Contacto @relation(fields: [contactoId], references: [id])
+
+  whatsappAccount WhatsappAccount @relation(fields: [whatsappAccountId], references: [id])
+
+  usuario Usuario? @relation("UsuarioConversaciones", fields: [asignadoA], references: [id])
+
+  mensajes Mensaje[]
+}
+
+model Mensaje {
+  id             String @id @default(uuid())
+  conversacionId String
+
+  contenido String
+  tipo      TipoMensaje
+
+  createdAt DateTime @default(now())
+
+  conversacion Conversacion @relation(fields: [conversacionId], references: [id])
+}
+
+enum TipoMensaje {
+  incoming
+  outgoing
+}
+
+enum EstadoConversacion {
+  nuevo
+  leido
+  respondido
+  seguimiento
+  cerrado
+}
+
+enum RolUsuario {
+  admin
+  vendedor
+}
