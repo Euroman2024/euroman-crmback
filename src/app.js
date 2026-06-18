@@ -5,6 +5,9 @@ const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
 const socketRoutes = require('./routes/socket.routes');
 const whatsappAccountRoutes = require("./routes/whatsappAccount.routes");
+const conversacionRoutes = require("./routes/conversacion.routes");
+const mensajeRoutes = require("./routes/mensaje.routes");
+
 const app = express();
 
 app.use(cors());
@@ -18,5 +21,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/socket', socketRoutes);
 app.use('/api/whatsapp-accounts', whatsappAccountRoutes);
+app.use('/api/conversaciones', conversacionRoutes);
+app.use('/api/messages', mensajeRoutes);
 
 module.exports = app;
