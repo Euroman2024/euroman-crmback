@@ -30,6 +30,10 @@ class WhatsAppService {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // Escuchar mensajes entrantes
+    const { handleIncomingMessage } = require('./inbound.service');
+    sock.ev.on('messages.upsert', (m) => handleIncomingMessage(accountId, m));
+
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
