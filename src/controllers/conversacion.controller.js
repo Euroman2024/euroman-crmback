@@ -1,0 +1,78 @@
+const prisma = require("../config/prisma");
+
+// Listar conversaciones activas
+const getConversaciones = async (req, res) => {
+  try {
+    const conversaciones = await prisma.conversacion.findMany({
+      include: {
+        contacto: true,
+        whatsappAccount: {
+          select: { id: true, nombre: true }
+        },
+        usuario: { // vendedor asignado
+          select: { id: true, nombre: true }
+        },
+        mensajes: {
+          orderBy: { createdAt: 'desc' },
+          take: 1 // Último mensaje para mostrar en la lista (snippet)
+        }
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      }
+    });
+    res.json(conversaciones);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error al obtener conversaciones" });
+  }
+};
+
+// Obtener todo el historial de mensajes de una conversación
+const getMensajesByConversacionId = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const mensajes = await prisma.mensaje.findMany({
+      where: { conversacionId: id },
+      orderBy: { createdAt: 'asc' }
+    });
+    
+    // Si se abren los mensajes, cambiar estado de "nuevo" a "leido" si queremos
+    await prisma.conversacion.update({
+      where: { id },
+      data: { estado: 'leido' }
+    });
+
+    res.json(mensajes);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error al obtener historial" });
+  }
+};
+
+// Cambiar estado o asignar vendedor
+const updateConversacion = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado, asignadoA } = req.body;
+
+    const conversacion = await prisma.conversacion.update({
+      where: { id },
+      data: {
+        ...(estado && { estado }),
+        ...(asignadoA !== undefined && { asignadoA }) // Puede ser null para desasignar
+      }
+    });
+
+    res.json(conversacion);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error al actualizar conversación" });
+  }
+};
+
+module.exports = {
+  getConversaciones,
+  getMensajesByConversacionId,
+  updateConversacion
+};
