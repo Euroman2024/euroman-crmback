@@ -104,8 +104,14 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
           // Generar nombre único
           const ext = mimetype.split('/')[1]?.split(';')[0] || 'bin';
           const filename = `${uuidv4()}.${ext}`;
-          const filepath = path.join(__dirname, '..', '..', 'public', 'uploads', filename);
+          const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
           
+          // Crear la carpeta si no existe
+          if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+          }
+          
+          const filepath = path.join(uploadDir, filename);
           fs.writeFileSync(filepath, buffer);
           archivoUrl = `/uploads/${filename}`;
           
