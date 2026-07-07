@@ -33,9 +33,10 @@ model WhatsappAccount {
 }
 
 model Contacto {
-  id        String   @id @default(uuid())
-  nombre    String?
-  telefono  String   @unique
+  id            String   @id @default(uuid())
+  nombre        String?
+  telefono      String   @unique
+  fotoPerfilUrl String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -66,10 +67,16 @@ model Conversacion {
 
 model Mensaje {
   id             String @id @default(uuid())
+  whatsappMsgId  String @unique @default(uuid()) // ID original de WhatsApp para evitar duplicados
   conversacionId String
 
-  contenido String
-  tipo      TipoMensaje
+  contenido  String
+  archivoUrl String?
+  mimetype   String?
+  tipo       TipoMensaje
+  
+  quotedMensajeId String?
+  quotedContenido String?
 
   createdAt DateTime @default(now())
 

@@ -7,7 +7,7 @@ const getConversaciones = async (req, res) => {
       include: {
         contacto: true,
         whatsappAccount: {
-          select: { id: true, nombre: true }
+          select: { id: true, nombre: true, estado: true }
         },
         usuario: { // vendedor asignado
           select: { id: true, nombre: true }
@@ -16,11 +16,16 @@ const getConversaciones = async (req, res) => {
           orderBy: { createdAt: 'desc' },
           take: 1 // Último mensaje para mostrar en la lista (snippet)
         }
-      },
-      orderBy: {
-        updatedAt: 'desc'
       }
     });
+
+    // Ordenar en memoria por la fecha real del último mensaje (garantiza el mismo orden que WhatsApp)
+    conversaciones.sort((a, b) => {
+      const dateA = a.mensajes && a.mensajes.length > 0 ? new Date(a.mensajes[0].createdAt).getTime() : new Date(a.createdAt).getTime();
+      const dateB = b.mensajes && b.mensajes.length > 0 ? new Date(b.mensajes[0].createdAt).getTime() : new Date(b.createdAt).getTime();
+      return dateB - dateA; // Descendente (más nuevos primero)
+    });
+
     res.json(conversaciones);
   } catch (error) {
     console.error(error);
