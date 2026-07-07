@@ -9,6 +9,7 @@ const {
   createAccount,
   updateAccount,
   deleteAccount,
+  logoutAccount,
 } = require(
   "../controllers/whatsappAccount.controller"
 );
@@ -41,6 +42,12 @@ router.delete(
   "/:id",
   authMiddleware,
   deleteAccount
+);
+
+router.post(
+  "/:id/logout",
+  authMiddleware,
+  logoutAccount
 );
 
 module.exports = router;

@@ -32,7 +32,74 @@ class WhatsAppService {
 
     // Escuchar mensajes entrantes
     const { handleIncomingMessage } = require('./inbound.service');
-    sock.ev.on('messages.upsert', (m) => handleIncomingMessage(accountId, m));
+    sock.ev.on('messages.upsert', (m) => handleIncomingMessage(accountId, m, sock));
+
+    // Escuchar historial al vincular dispositivo
+    sock.ev.on('messaging-history.set', async ({ messages, contacts }) => {
+      console.log(`[Baileys] Recibiendo historial: ${messages?.length || 0} mensajes y ${contacts?.length || 0} contactos.`);
+      
+      // Sincronizar Contactos de la Agenda en segundo plano sin bloquear
+      if (contacts && contacts.length > 0) {
+        console.log(`[Baileys] Sincronizando nombres de la agenda telefónica en segundo plano...`);
+        (async () => {
+          for (const c of contacts) {
+            const nombreReal = c.name || c.notify; // Prioriza el nombre guardado en la agenda
+            if (!nombreReal) continue;
+
+            const remoteJid = c.id;
+            if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
+            
+            const [idPart, domainPart] = remoteJid.split('@');
+            const telefono = `${idPart.split(':')[0]}@${domainPart}`;
+
+            try {
+              await prisma.contacto.upsert({
+                where: { telefono },
+                update: { nombre: nombreReal },
+                create: { telefono, nombre: nombreReal }
+              });
+            } catch(e) {}
+          }
+          console.log(`[Baileys] Sincronización de ${contacts.length} contactos finalizada.`);
+        })();
+      }
+
+      // Procesar solo mensajes de los últimos 3 días para no saturar
+      const threeDaysAgo = (Date.now() / 1000) - (3 * 24 * 60 * 60);
+      const recentMessages = (messages || []).filter(m => {
+        const ts = typeof m.messageTimestamp === 'object' ? m.messageTimestamp.low : m.messageTimestamp;
+        return ts > threeDaysAgo;
+      });
+      
+      console.log(`[Baileys] Procesando ${recentMessages.length} mensajes de los últimos 3 días en segundo plano...`);
+      
+      for (const msg of recentMessages) {
+        // Reutilizamos la lógica de entrada
+        await handleIncomingMessage(accountId, { messages: [msg], type: 'notify' }, sock);
+      }
+      console.log(`[Baileys] Sincronización de historial reciente completada.`);
+    });
+
+    // Escuchar actualizaciones de contactos nuevos guardados en el teléfono
+    sock.ev.on('contacts.upsert', async (contacts) => {
+      for (const c of contacts) {
+        const nombreReal = c.name || c.notify;
+        if (!nombreReal) continue;
+        const remoteJid = c.id;
+        if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
+        
+        const [idPart, domainPart] = remoteJid.split('@');
+        const telefono = `${idPart.split(':')[0]}@${domainPart}`;
+
+        try {
+          await prisma.contacto.upsert({
+            where: { telefono },
+            update: { nombre: nombreReal },
+            create: { telefono, nombre: nombreReal }
+          });
+        } catch(e) {}
+      }
+    });
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -83,10 +150,44 @@ class WhatsAppService {
         console.log(`[Baileys] Connection opened for account ${accountId}`);
         
         try {
-          await prisma.whatsappAccount.update({
-            where: { id: accountId },
-            data: { estado: 'conectado' }
-          });
+          // Extraer número real del socket
+          const realNumber = sock.user.id.split(':')[0];
+          
+          const acc = await prisma.whatsappAccount.findUnique({ where: { id: accountId } });
+          
+          if (!acc.numero) {
+            // Primer escaneo: Asignación dinámica
+            const exists = await prisma.whatsappAccount.findFirst({
+              where: { numero: realNumber, id: { not: accountId } }
+            });
+            
+            if (exists) {
+              console.log(`[Baileys] Rechazado: El número ${realNumber} ya pertenece a ${exists.nombre}.`);
+              await sock.logout();
+              getIO().emit('auth_error', { accountId, message: `El número escaneado ya pertenece a la línea: ${exists.nombre}.` });
+              return;
+            }
+            
+            // Reclamar ranura
+            await prisma.whatsappAccount.update({
+              where: { id: accountId },
+              data: { numero: realNumber, estado: 'conectado' }
+            });
+          } else {
+            // Reconexión: Verificación estricta
+            if (acc.numero !== realNumber) {
+              console.log(`[Baileys] Rechazado: Ranura de ${acc.numero} escaneada por ${realNumber}.`);
+              await sock.logout();
+              getIO().emit('auth_error', { accountId, message: `Número incorrecto. Esta ranura es exclusiva para el número ${acc.numero}.` });
+              return;
+            }
+            
+            // Restaurado normal
+            await prisma.whatsappAccount.update({
+              where: { id: accountId },
+              data: { estado: 'conectado' }
+            });
+          }
           
           try {
             getIO().emit('status_changed', { accountId, status: 'conectado' });
