@@ -160,9 +160,13 @@ const sendMedia = async (req, res) => {
     // Mover archivo a la carpeta pública si queremos guardarlo (opcional, como inbound)
     const ext = path.extname(file.originalname);
     const fileName = `${Date.now()}_${Math.floor(Math.random()*1000)}${ext}`;
-    const newPath = path.join(__dirname, '..', '..', 'uploads', fileName);
+    const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const newPath = path.join(uploadDir, fileName);
     fs.renameSync(file.path, newPath);
-    const archivoUrl = `/api/uploads/${fileName}`;
+    const archivoUrl = `/uploads/${fileName}`;
 
     // 4. Guardar en PostgreSQL
     const nuevoMensaje = await prisma.mensaje.create({
