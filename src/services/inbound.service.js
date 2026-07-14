@@ -65,12 +65,10 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       });
 
       if (!contacto) {
-        const nombreInicial = formatPhoneForDisplay(telefono.split('@')[0]);
-
         contacto = await prisma.contacto.create({
           data: {
             telefono,
-            nombre: nombreInicial || null,
+            nombre: null,
             fotoPerfilUrl: null
           }
         });

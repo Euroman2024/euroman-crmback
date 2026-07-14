@@ -6,6 +6,11 @@ const prisma = require('../config/prisma');
 const qrcode = require('qrcode');
 const { getIO } = require('../sockets/socket');
 
+const isUnknownContactName = (name) => {
+  if (!name) return true;
+  return /^(desconocido|unknown|whatsapp business|whatsapp user|unregistered)$/i.test(String(name).trim());
+};
+
 class WhatsAppService {
   constructor() {
     this.sessions = new Map(); // Store active sessions by accountId
@@ -43,8 +48,8 @@ class WhatsAppService {
         console.log(`[Baileys] Sincronizando nombres de la agenda telefónica en segundo plano...`);
         (async () => {
           for (const c of contacts) {
-            const nombreReal = c.name || c.notify; // Prioriza el nombre guardado en la agenda
-            if (!nombreReal) continue;
+            const nombreReal = c.name || c.notify;
+            if (!nombreReal || isUnknownContactName(nombreReal)) continue;
 
             const remoteJid = c.id;
             if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
@@ -84,7 +89,7 @@ class WhatsAppService {
     sock.ev.on('contacts.upsert', async (contacts) => {
       for (const c of contacts) {
         const nombreReal = c.name || c.notify;
-        if (!nombreReal) continue;
+        if (!nombreReal || isUnknownContactName(nombreReal)) continue;
         const remoteJid = c.id;
         if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
         

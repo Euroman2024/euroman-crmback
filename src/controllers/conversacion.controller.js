@@ -1,5 +1,22 @@
 const prisma = require("../config/prisma");
 
+const isUnknownContactName = (name) => {
+  if (!name) return true;
+  return /^(desconocido|unknown|whatsapp business|whatsapp user|unregistered)$/i.test(String(name).trim());
+};
+
+const normalizeContacto = (contacto) => {
+  if (!contacto) return contacto;
+  const name = contacto.nombre?.trim();
+  if (!name || isUnknownContactName(name)) {
+    return {
+      ...contacto,
+      nombre: null
+    };
+  }
+  return contacto;
+};
+
 // Listar conversaciones activas
 const getConversaciones = async (req, res) => {
   try {
@@ -26,7 +43,11 @@ const getConversaciones = async (req, res) => {
       return dateB - dateA; // Descendente (más nuevos primero)
     });
 
-    res.json(conversaciones);
+    const normalized = conversaciones.map((conv) => ({
+      ...conv,
+      contacto: normalizeContacto(conv.contacto)
+    }));
+    res.json(normalized);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error al obtener conversaciones" });
