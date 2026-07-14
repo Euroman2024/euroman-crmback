@@ -5,6 +5,32 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
+const formatPhoneForDisplay = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+
+  let countryCode = '';
+  let remaining = digits;
+
+  if (digits.length > 10) {
+    countryCode = digits.slice(0, digits.length - 10);
+    remaining = digits.slice(countryCode.length);
+  }
+
+  const groups = [];
+  while (remaining.length > 0) {
+    if (remaining.length > 4) {
+      groups.push(remaining.slice(0, 3));
+      remaining = remaining.slice(3);
+    } else {
+      groups.push(remaining);
+      remaining = '';
+    }
+  }
+
+  return `${countryCode ? `+${countryCode} ` : ''}${groups.join(' ')}`.trim();
+};
+
 const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
   try {
     const { messages, type } = messageUpsert;
@@ -39,12 +65,12 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       });
 
       if (!contacto) {
-        const nombrePush = (!isFromMe && msg.pushName) ? msg.pushName : 'Desconocido';
-        
+        const nombreInicial = formatPhoneForDisplay(telefono.split('@')[0]);
+
         contacto = await prisma.contacto.create({
           data: {
             telefono,
-            nombre: nombrePush,
+            nombre: nombreInicial || null,
             fotoPerfilUrl: null
           }
         });
