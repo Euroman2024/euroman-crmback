@@ -58,11 +58,16 @@ class WhatsAppService {
             const telefono = `${idPart.split(':')[0]}@${domainPart}`;
 
             try {
-              await prisma.contacto.upsert({
-                where: { telefono },
-                update: { nombre: nombreReal },
-                create: { telefono, nombre: nombreReal }
-              });
+              const existingContact = await prisma.contacto.findUnique({ where: { telefono } });
+              if (!existingContact) {
+                await prisma.contacto.create({ data: { telefono, nombre: nombreReal } });
+              } else {
+                const currentName = existingContact.nombre;
+                const isCurrentUnknown = !currentName || isUnknownContactName(currentName);
+                if (isCurrentUnknown || c.name) {
+                  await prisma.contacto.update({ where: { telefono }, data: { nombre: nombreReal } });
+                }
+              }
             } catch(e) {}
           }
           console.log(`[Baileys] Sincronización de ${contacts.length} contactos finalizada.`);
@@ -97,11 +102,16 @@ class WhatsAppService {
         const telefono = `${idPart.split(':')[0]}@${domainPart}`;
 
         try {
-          await prisma.contacto.upsert({
-            where: { telefono },
-            update: { nombre: nombreReal },
-            create: { telefono, nombre: nombreReal }
-          });
+          const existingContact = await prisma.contacto.findUnique({ where: { telefono } });
+          if (!existingContact) {
+            await prisma.contacto.create({ data: { telefono, nombre: nombreReal } });
+          } else {
+            const currentName = existingContact.nombre;
+            const isCurrentUnknown = !currentName || isUnknownContactName(currentName);
+            if (isCurrentUnknown || c.name) {
+              await prisma.contacto.update({ where: { telefono }, data: { nombre: nombreReal } });
+            }
+          }
         } catch(e) {}
       }
     });
