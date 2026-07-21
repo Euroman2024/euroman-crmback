@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
-
-async function main() {
+const prisma = require('./src/config/prisma');
+async function fixLidContacts() {
+  console.log('[Init] Starting LID contacts cleanup...');
   const sessionsDir = path.join(__dirname, 'sessions');
   if (!fs.existsSync(sessionsDir)) return;
 
@@ -46,7 +45,7 @@ async function main() {
     }
   }
   
-  console.log(`Done! Updated ${updatedCount} LID contacts.`);
+  console.log(`[Init] Done! Updated ${updatedCount} LID contacts.`);
 }
 
-main().finally(() => prisma.$disconnect());
+module.exports = { fixLidContacts };
