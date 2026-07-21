@@ -68,7 +68,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         contacto = await prisma.contacto.create({
           data: {
             telefono,
-            nombre: null,
+            nombre: msg.pushName || null,
             fotoPerfilUrl: null
           }
         });
@@ -84,6 +84,12 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
             }
           }).catch(() => {});
         }
+      } else if (!contacto.nombre && msg.pushName) {
+        // Update name if missing
+        contacto = await prisma.contacto.update({
+          where: { id: contacto.id },
+          data: { nombre: msg.pushName }
+        });
       }
 
       // 2. Lógica de Conversación
