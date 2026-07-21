@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { fixLidContacts } = require("../../fix-lid-contacts");
 
 const isUnknownContactName = (name) => {
   if (!name) return true;
@@ -20,6 +21,9 @@ const normalizeContacto = (contacto) => {
 // Listar conversaciones activas
 const getConversaciones = async (req, res) => {
   try {
+    // Sincronizar nombres LID en segundo plano cada vez que cargan la página
+    fixLidContacts().catch(err => console.error("Error background lid fix:", err));
+
     const conversaciones = await prisma.conversacion.findMany({
       include: {
         contacto: true,
