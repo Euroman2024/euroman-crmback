@@ -11,6 +11,21 @@ const isUnknownContactName = (name) => {
   return /^(desconocido|unknown|whatsapp business|whatsapp user|unregistered)$/i.test(String(name).trim());
 };
 
+const upsertContactData = async (telefono, nombreReal, allowOverwrite) => {
+  try {
+    const existingContact = await prisma.contacto.findUnique({ where: { telefono } });
+    if (!existingContact) {
+      await prisma.contacto.create({ data: { telefono, nombre: nombreReal } });
+    } else {
+      const currentName = existingContact.nombre;
+      const isCurrentUnknown = !currentName || isUnknownContactName(currentName);
+      if (isCurrentUnknown || allowOverwrite) {
+        await prisma.contacto.update({ where: { telefono }, data: { nombre: nombreReal } });
+      }
+    }
+  } catch(e) {}
+};
+
 class WhatsAppService {
   constructor() {
     this.sessions = new Map(); // Store active sessions by accountId
@@ -57,18 +72,13 @@ class WhatsAppService {
             const [idPart, domainPart] = remoteJid.split('@');
             const telefono = `${idPart.split(':')[0]}@${domainPart}`;
 
-            try {
-              const existingContact = await prisma.contacto.findUnique({ where: { telefono } });
-              if (!existingContact) {
-                await prisma.contacto.create({ data: { telefono, nombre: nombreReal } });
-              } else {
-                const currentName = existingContact.nombre;
-                const isCurrentUnknown = !currentName || isUnknownContactName(currentName);
-                if (isCurrentUnknown || c.name) {
-                  await prisma.contacto.update({ where: { telefono }, data: { nombre: nombreReal } });
-                }
-              }
-            } catch(e) {}
+            await upsertContactData(telefono, nombreReal, !!c.name);
+
+            if (c.lidJid) {
+              const [lidId, lidDomain] = c.lidJid.split('@');
+              const lidTelefono = `${lidId.split(':')[0]}@${lidDomain || 'lid'}`;
+              await upsertContactData(lidTelefono, nombreReal, !!c.name);
+            }
           }
           console.log(`[Baileys] Sincronización de ${contacts.length} contactos finalizada.`);
         })();
@@ -101,18 +111,13 @@ class WhatsAppService {
         const [idPart, domainPart] = remoteJid.split('@');
         const telefono = `${idPart.split(':')[0]}@${domainPart}`;
 
-        try {
-          const existingContact = await prisma.contacto.findUnique({ where: { telefono } });
-          if (!existingContact) {
-            await prisma.contacto.create({ data: { telefono, nombre: nombreReal } });
-          } else {
-            const currentName = existingContact.nombre;
-            const isCurrentUnknown = !currentName || isUnknownContactName(currentName);
-            if (isCurrentUnknown || c.name) {
-              await prisma.contacto.update({ where: { telefono }, data: { nombre: nombreReal } });
-            }
-          }
-        } catch(e) {}
+        await upsertContactData(telefono, nombreReal, !!c.name);
+
+        if (c.lidJid) {
+          const [lidId, lidDomain] = c.lidJid.split('@');
+          const lidTelefono = `${lidId.split(':')[0]}@${lidDomain || 'lid'}`;
+          await upsertContactData(lidTelefono, nombreReal, !!c.name);
+        }
       }
     });
 
