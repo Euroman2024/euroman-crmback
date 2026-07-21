@@ -25,6 +25,11 @@ const getConversaciones = async (req, res) => {
     fixLidContacts().catch(err => console.error("Error background lid fix:", err));
 
     const conversaciones = await prisma.conversacion.findMany({
+      where: {
+        mensajes: {
+          some: {}
+        }
+      },
       include: {
         contacto: true,
         whatsappAccount: {

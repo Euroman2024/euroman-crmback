@@ -92,30 +92,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         });
       }
 
-      // 2. Lógica de Conversación
-      let conversacion = await prisma.conversacion.findFirst({
-        where: {
-          contactoId: contacto.id,
-          whatsappAccountId: accountId
-        }
-      });
-
-      if (!conversacion) {
-        conversacion = await prisma.conversacion.create({
-          data: {
-            contactoId: contacto.id,
-            whatsappAccountId: accountId,
-            estado: 'nuevo'
-          }
-        });
-      } else {
-        if (!isFromMe) {
-          conversacion = await prisma.conversacion.update({
-            where: { id: conversacion.id },
-            data: { estado: 'nuevo' }
-          });
-        }
-      }
+      // Mover la creación de conversación más abajo
 
       // Extraer contenido y archivos
       let contenido = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
@@ -153,6 +130,31 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       }
 
       if (!contenido && !archivoUrl) continue;
+
+      // 2. Lógica de Conversación
+      let conversacion = await prisma.conversacion.findFirst({
+        where: {
+          contactoId: contacto.id,
+          whatsappAccountId: accountId
+        }
+      });
+
+      if (!conversacion) {
+        conversacion = await prisma.conversacion.create({
+          data: {
+            contactoId: contacto.id,
+            whatsappAccountId: accountId,
+            estado: 'nuevo'
+          }
+        });
+      } else {
+        if (!isFromMe) {
+          conversacion = await prisma.conversacion.update({
+            where: { id: conversacion.id },
+            data: { estado: 'nuevo' }
+          });
+        }
+      }
 
       let quotedMensajeId = null;
       let quotedContenido = null;
