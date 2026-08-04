@@ -30,10 +30,49 @@ class WhatsAppService {
   constructor() {
     this.sessions = new Map(); // Store active sessions by accountId
     this.startRetries = new Map(); // Retry counters per account
+    this.pendingResets = new Set(); // Prevent duplicate resets
+
+    // Poll interval configurable via env (ms). Default 10s in production for faster QR generation.
+    this.pollInterval = parseInt(process.env.SESSION_WATCHER_INTERVAL_MS || '10000', 10);
+
+    // Sessions directory configurable (use Persistent Volume in production)
+    this.sessionsBase = process.env.SESSIONS_DIR || path.join(__dirname, '..', '..', 'sessions');
+
+    // Start a periodic watcher to detect accounts marked 'desconectado' in DB
+    this._startDisconnectedWatcher();
+  }
+
+  _startDisconnectedWatcher() {
+    // Poll using configured interval
+    setInterval(async () => {
+      try {
+        const toReset = await prisma.whatsappAccount.findMany({ where: { estado: 'desconectado' } });
+        for (const acc of toReset) {
+          const id = acc.id;
+          if (this.pendingResets.has(id)) continue;
+          const sock = this.sessions.get(id);
+          if (sock) continue; // already have a running socket
+          this.pendingResets.add(id);
+          (async () => {
+            try {
+              const sessionDir = path.join(__dirname, '..', '..', 'sessions', id);
+              try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
+              await this.startSession(id);
+            } catch (err) {
+              console.error(`[Watcher] Failed to reset session for ${id}:`, err?.message || err);
+            } finally {
+              this.pendingResets.delete(id);
+            }
+          })();
+        }
+      } catch (err) {
+        console.error('[Watcher] Error checking disconnected accounts:', err);
+      }
+    }, this.pollInterval);
   }
 
   async startSession(accountId) {
-    const sessionDir = path.join(__dirname, '..', '..', 'sessions', accountId);
+    const sessionDir = path.join(this.sessionsBase, accountId);
     
     // Ensure sessions directory exists
     if (!fs.existsSync(sessionDir)) {
@@ -253,7 +292,16 @@ class WhatsAppService {
       const accounts = await prisma.whatsappAccount.findMany();
       console.log(`[Baileys] Found ${accounts.length} accounts. Initializing sessions...`);
       for (const acc of accounts) {
-        await this.startSession(acc.id);
+        const sessionDir = path.join(this.sessionsBase, acc.id);
+        // If DB marks account as 'desconectado', force QR generation by removing saved session
+        if (acc.estado === 'desconectado') {
+          console.log(`[Baileys] Account ${acc.id} marked 'desconectado' in DB — forcing QR generation.`);
+          try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
+          // Start session to generate QR
+          await this.startSession(acc.id);
+        } else {
+          await this.startSession(acc.id);
+        }
       }
     } catch (error) {
       console.error("[Baileys] Error restoring sessions on startup:", error);
