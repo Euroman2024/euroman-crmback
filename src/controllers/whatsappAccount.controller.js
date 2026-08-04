@@ -11,7 +11,12 @@ const getAccounts = async (req, res) => {
       },
     });
 
-    res.json(accounts);
+    const accountsWithQrs = accounts.map(acc => ({
+      ...acc,
+      qr: whatsappService.qrs.get(acc.id) || null
+    }));
+
+    res.json(accountsWithQrs);
   } catch (error) {
     console.error(error);
 

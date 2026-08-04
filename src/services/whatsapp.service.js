@@ -31,6 +31,7 @@ class WhatsAppService {
     this.sessions = new Map(); // Store active sessions by accountId
     this.startRetries = new Map(); // Retry counters per account
     this.pendingResets = new Set(); // Prevent duplicate resets
+    this.qrs = new Map(); // Store latest generated QRs
 
     // Poll interval configurable via env (ms). Default 10s in production for faster QR generation.
     this.pollInterval = parseInt(process.env.SESSION_WATCHER_INTERVAL_MS || '10000', 10);
@@ -182,6 +183,7 @@ class WhatsAppService {
             return;
           }
           console.log(`[Baileys] QR Generated for account ${accountId}`);
+          this.qrs.set(accountId, url);
           try {
             getIO().emit('qr_generated', { accountId, qr: url });
           } catch (e) {
@@ -191,6 +193,7 @@ class WhatsAppService {
       }
 
       if (connection === 'close') {
+        this.qrs.delete(accountId);
         const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
         console.log(`[Baileys] Connection closed for account ${accountId}. Reconnecting:`, shouldReconnect, 'reason:', lastDisconnect?.error);
 
@@ -230,6 +233,7 @@ class WhatsAppService {
         }
 
       } else if (connection === 'open') {
+        this.qrs.delete(accountId);
         console.log(`[Baileys] Connection opened for account ${accountId}`);
         
         try {
