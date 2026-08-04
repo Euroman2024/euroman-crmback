@@ -1,4 +1,4 @@
-const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
@@ -30,6 +30,7 @@ class WhatsAppService {
   constructor() {
     this.sessions = new Map(); // Store active sessions by accountId
     this.startRetries = new Map(); // Retry counters per account
+    this.reconnectTimers = new Map(); // Store timeout IDs for reconnection
     this.pendingResets = new Set(); // Prevent duplicate resets
     this.qrs = new Map(); // Store latest generated QRs
 
@@ -73,6 +74,20 @@ class WhatsAppService {
   }
 
   async startSession(accountId) {
+    // Destroy existing socket if it exists to prevent concurrent connections
+    const existingSock = this.sessions.get(accountId);
+    if (existingSock) {
+      try { existingSock.ev.removeAllListeners(); } catch (e) {}
+      try { existingSock.ws.close(); } catch (e) {}
+      this.sessions.delete(accountId);
+    }
+
+    // Clear any pending reconnect timers
+    if (this.reconnectTimers.has(accountId)) {
+      clearTimeout(this.reconnectTimers.get(accountId));
+      this.reconnectTimers.delete(accountId);
+    }
+
     const sessionDir = path.join(this.sessionsBase, accountId);
     
     // Ensure sessions directory exists
@@ -96,7 +111,7 @@ class WhatsAppService {
       auth: state,
       printQRInTerminal: false,
       logger: pino({ level: 'silent' }), // Suppress baileys logs
-      browser: ['CRM Ventas', 'Chrome', '10.0'], // Identify as CRM
+      browser: Browsers.macOS('Desktop'), // Identify as standard browser to avoid 405 Method Not Allowed
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -212,11 +227,13 @@ class WhatsAppService {
             const delay = Math.min(5 * 60 * 1000, 1000 * Math.pow(2, retries)); // max 5 minutes
             this.startRetries.set(accountId, retries + 1);
             console.log(`[Baileys] Scheduling reconnect for ${accountId} in ${delay}ms (attempt ${retries + 1})`);
-            setTimeout(() => {
+            const timerId = setTimeout(() => {
+              this.reconnectTimers.delete(accountId);
               this.startSession(accountId).catch(err => {
                 console.error(`[Baileys] Reconnect attempt failed for ${accountId}:`, err?.message || err);
               });
             }, delay);
+            this.reconnectTimers.set(accountId, timerId);
           } else {
             // Logged out: Delete session directory so a new QR can be generated
             try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
@@ -224,9 +241,11 @@ class WhatsAppService {
             try { getIO().emit('auth_error', { accountId, message: 'Sesión cerrada (logout). Escanea el QR para volver a vincular.' }); } catch(e){}
             
             // Iniciar nueva sesión para que genere un nuevo QR
-            setTimeout(() => {
+            const timerId = setTimeout(() => {
+              this.reconnectTimers.delete(accountId);
               this.startSession(accountId).catch(console.error);
             }, 1000);
+            this.reconnectTimers.set(accountId, timerId);
           }
         } catch (dbError) {
           console.error("DB Error updating account status:", dbError);
