@@ -175,6 +175,35 @@ const logoutAccount = async (req, res) => {
   }
 };
 
+// Forzar reinicio de sesión: borrar directorio de sesión y reiniciar startSession
+const resetSession = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const account = await prisma.whatsappAccount.findUnique({ where: { id } });
+    if (!account) return res.status(404).json({ message: 'Cuenta no encontrada' });
+
+    if (account.estado === 'conectado') {
+      return res.status(400).json({ message: 'Cuenta ya conectada' });
+    }
+
+    const sessionDir = path.join(__dirname, "..", "..", "sessions", id);
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+
+    // Remove from in-memory map if present
+    whatsappService.sessions.delete(id);
+
+    // Start session to generate QR
+    whatsappService.startSession(id);
+
+    res.json({ message: 'Reinicio solicitado. Si hay QR se emitirá al frontend.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error interno al reiniciar sesión' });
+  }
+};
+
 module.exports = {
   getAccounts,
   getAccountById,
@@ -182,4 +211,5 @@ module.exports = {
   updateAccount,
   deleteAccount,
   logoutAccount,
+  resetSession,
 };

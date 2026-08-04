@@ -39,7 +39,17 @@ class WhatsAppService {
       fs.mkdirSync(sessionDir, { recursive: true });
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    let state, saveCreds;
+    try {
+      ({ state, saveCreds } = await useMultiFileAuthState(sessionDir));
+    } catch (err) {
+      console.error(`[Baileys] Error creando auth state para ${accountId}:`, err.message || err);
+      try { getIO().emit('auth_error', { accountId, message: 'Error al preparar autenticación' }); } catch(e){}
+      throw err;
+    }
+
+    // Notify frontend that we are attempting to connect
+    try { getIO().emit('status_changed', { accountId, status: 'conectando' }); } catch(e){}
 
     const sock = makeWASocket({
       auth: state,
