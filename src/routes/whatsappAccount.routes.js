@@ -11,6 +11,7 @@ const {
   updateAccount,
   deleteAccount,
   logoutAccount,
+  resetSession,
 } = require(
   "../controllers/whatsappAccount.controller"
 );
