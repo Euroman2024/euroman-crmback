@@ -162,7 +162,7 @@ const logoutAccount = async (req, res) => {
       res.json({ message: "Sesión de WhatsApp cerrada correctamente" });
     } else {
       // Si el socket no está corriendo pero hay sesión guardada
-      const sessionDir = path.join(__dirname, "..", "..", "sessions", id);
+      const sessionDir = path.join(whatsappService.sessionsBase, id);
       if (fs.existsSync(sessionDir)) {
         fs.rmSync(sessionDir, { recursive: true, force: true });
       }
@@ -186,7 +186,7 @@ const resetSession = async (req, res) => {
       return res.status(400).json({ message: 'Cuenta ya conectada' });
     }
 
-    const sessionDir = path.join(__dirname, "..", "..", "sessions", id);
+    const sessionDir = path.join(whatsappService.sessionsBase, id);
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
     }

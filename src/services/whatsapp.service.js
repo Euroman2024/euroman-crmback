@@ -55,7 +55,7 @@ class WhatsAppService {
           this.pendingResets.add(id);
           (async () => {
             try {
-              const sessionDir = path.join(__dirname, '..', '..', 'sessions', id);
+              const sessionDir = path.join(this.sessionsBase, id);
               try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
               await this.startSession(id);
             } catch (err) {
