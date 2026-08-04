@@ -219,6 +219,11 @@ class WhatsAppService {
             try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
             this.sessions.delete(accountId);
             try { getIO().emit('auth_error', { accountId, message: 'Sesión cerrada (logout). Escanea el QR para volver a vincular.' }); } catch(e){}
+            
+            // Iniciar nueva sesión para que genere un nuevo QR
+            setTimeout(() => {
+              this.startSession(accountId).catch(console.error);
+            }, 1000);
           }
         } catch (dbError) {
           console.error("DB Error updating account status:", dbError);
