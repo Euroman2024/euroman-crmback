@@ -29,6 +29,7 @@ const upsertContactData = async (telefono, nombreReal, allowOverwrite) => {
 class WhatsAppService {
   constructor() {
     this.sessions = new Map(); // Store active sessions by accountId
+    this.startRetries = new Map(); // Retry counters per account
   }
 
   async startSession(accountId) {
@@ -151,26 +152,34 @@ class WhatsAppService {
       }
 
       if (connection === 'close') {
-        const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-        console.log(`[Baileys] Connection closed for account ${accountId}. Reconnecting:`, shouldReconnect);
-        
+        const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        console.log(`[Baileys] Connection closed for account ${accountId}. Reconnecting:`, shouldReconnect, 'reason:', lastDisconnect?.error);
+
         try {
           // Update DB state
           await prisma.whatsappAccount.update({
             where: { id: accountId },
             data: { estado: 'desconectado' }
           });
-          
-          try {
-            getIO().emit('status_changed', { accountId, status: 'desconectado' });
-          } catch (e) {}
+
+          try { getIO().emit('status_changed', { accountId, status: 'desconectado' }); } catch (e) {}
 
           if (shouldReconnect) {
-            this.startSession(accountId);
+            // Exponential backoff reconnect
+            const retries = this.startRetries.get(accountId) || 0;
+            const delay = Math.min(5 * 60 * 1000, 1000 * Math.pow(2, retries)); // max 5 minutes
+            this.startRetries.set(accountId, retries + 1);
+            console.log(`[Baileys] Scheduling reconnect for ${accountId} in ${delay}ms (attempt ${retries + 1})`);
+            setTimeout(() => {
+              this.startSession(accountId).catch(err => {
+                console.error(`[Baileys] Reconnect attempt failed for ${accountId}:`, err?.message || err);
+              });
+            }, delay);
           } else {
             // Logged out: Delete session directory so a new QR can be generated
-            fs.rmSync(sessionDir, { recursive: true, force: true });
+            try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
             this.sessions.delete(accountId);
+            try { getIO().emit('auth_error', { accountId, message: 'Sesión cerrada (logout). Escanea el QR para volver a vincular.' }); } catch(e){}
           }
         } catch (dbError) {
           console.error("DB Error updating account status:", dbError);
@@ -219,15 +228,17 @@ class WhatsAppService {
             });
           }
           
-          try {
-            getIO().emit('status_changed', { accountId, status: 'conectado' });
-          } catch (e) {}
+          try { getIO().emit('status_changed', { accountId, status: 'conectado' }); } catch (e) {}
+
+          // Reset retry counter on successful open
+          this.startRetries.set(accountId, 0);
         } catch (dbError) {
           console.error("DB Error updating account status:", dbError);
         }
       }
     });
 
+    // Save session socket reference
     this.sessions.set(accountId, sock);
     return sock;
   }
