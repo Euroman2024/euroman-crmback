@@ -1,4 +1,4 @@
-const { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
@@ -107,11 +107,14 @@ class WhatsAppService {
     // Notify frontend that we are attempting to connect
     try { getIO().emit('status_changed', { accountId, status: 'conectando' }); } catch(e){}
 
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`[Baileys] Fetching WA Web Version for ${accountId}: v${version.join('.')} (isLatest: ${isLatest})`);
+
     const sock = makeWASocket({
+      version,
       auth: state,
       printQRInTerminal: false,
       logger: pino({ level: 'silent' }), // Suppress baileys logs
-      browser: Browsers.macOS('Desktop'), // Identify as standard browser to avoid 405 Method Not Allowed
     });
 
     sock.ev.on('creds.update', saveCreds);
