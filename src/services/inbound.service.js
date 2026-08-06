@@ -144,7 +144,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
           data: {
             contactoId: contacto.id,
             whatsappAccountId: accountId,
-            estado: 'nuevo'
+            estado: isFromMe ? 'leido' : 'nuevo'
           }
         });
       } else {
@@ -152,6 +152,11 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
           conversacion = await prisma.conversacion.update({
             where: { id: conversacion.id },
             data: { estado: 'nuevo' }
+          });
+        } else if (conversacion.estado === 'nuevo') {
+          conversacion = await prisma.conversacion.update({
+            where: { id: conversacion.id },
+            data: { estado: 'leido' }
           });
         }
       }
