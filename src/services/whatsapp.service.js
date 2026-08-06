@@ -115,6 +115,9 @@ class WhatsAppService {
       auth: state,
       printQRInTerminal: false,
       logger: pino({ level: 'silent' }), // Suppress baileys logs
+      markOnlineOnConnect: false, // Prevents hanging on initial sync
+      syncFullHistory: false, // Prevents hanging on large chats
+      browser: Browsers.macOS('Desktop'), // Standard browser string
     });
 
     sock.ev.on('creds.update', saveCreds);
