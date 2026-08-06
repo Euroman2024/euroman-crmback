@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { getIO } = require("../sockets/socket");
 const { fixLidContacts } = require("../../fix-lid-contacts");
 
 const isUnknownContactName = (name) => {
@@ -89,15 +90,35 @@ const getMensajesByConversacionId = async (req, res) => {
 const updateConversacion = async (req, res) => {
   try {
     const { id } = req.params;
-    const { estado, asignadoA } = req.body;
+    const { estado, asignadoA, notaAsignacion } = req.body;
 
     const conversacion = await prisma.conversacion.update({
       where: { id },
       data: {
         ...(estado && { estado }),
-        ...(asignadoA !== undefined && { asignadoA }) // Puede ser null para desasignar
+        ...(asignadoA !== undefined && { asignadoA }), // Puede ser null para desasignar
+        ...(notaAsignacion !== undefined && { notaAsignacion })
+      },
+      include: {
+        usuario: {
+          select: { id: true, nombre: true }
+        }
       }
     });
+
+    // Emit event if assignment changed
+    if (asignadoA !== undefined) {
+      try {
+        getIO().emit('chat_assigned', {
+          conversacionId: id,
+          asignadoA: conversacion.asignadoA,
+          notaAsignacion: conversacion.notaAsignacion,
+          usuario: conversacion.usuario // Contains id and nombre
+        });
+      } catch (e) {
+        console.error("Error emitting chat_assigned:", e);
+      }
+    }
 
     res.json(conversacion);
   } catch (error) {

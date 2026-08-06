@@ -7,7 +7,7 @@ const path = require("path");
 // Enviar mensaje saliente (Outbound)
 const sendMessage = async (req, res) => {
   try {
-    const { conversacionId, contenido, quotedMessageId } = req.body;
+    const { conversacionId, contenido, quotedMessageId, isInternalNote } = req.body;
 
     if (!conversacionId || !contenido) {
       return res.status(400).json({ message: "ConversacionId y contenido son requeridos" });
@@ -40,6 +40,31 @@ const sendMessage = async (req, res) => {
 
     // 3. Enviar el mensaje físico a través de WhatsApp
     let options = {};
+
+    // Si es nota interna, NO enviar por WhatsApp, solo guardar en BD
+    if (isInternalNote) {
+      const nuevoMensaje = await prisma.mensaje.create({
+        data: {
+          conversacionId,
+          contenido,
+          tipo: 'outgoing', // Representa un mensaje nuestro, pero será diferenciado por el mimetype
+          mimetype: 'internal-note',
+          quotedMensajeId: null,
+          quotedContenido: null
+        }
+      });
+
+      try {
+        getIO().emit('message_sent', {
+          conversacionId,
+          mensaje: nuevoMensaje
+        });
+      } catch (e) {
+         console.error("Error al emitir socket de nota interna:", e.message);
+      }
+      
+      return res.status(200).json(nuevoMensaje);
+    }
 
     // Si se está respondiendo a un mensaje (Citar)
     if (quotedMessageId) {
@@ -157,15 +182,15 @@ const sendMedia = async (req, res) => {
 
     await sock.sendMessage(jid, messageContent, options);
 
-    // Mover archivo a la carpeta pública si queremos guardarlo (opcional, como inbound)
+    // Si hay archivo, guardarlo en el servidor (o en UPLOADS_DIR) local
     const ext = path.extname(file.originalname);
     const fileName = `${Date.now()}_${Math.floor(Math.random()*1000)}${ext}`;
-    const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
     }
-    const newPath = path.join(uploadDir, fileName);
-    fs.renameSync(file.path, newPath);
+    const filePath = path.join(uploadsDir, fileName);
+    fs.writeFileSync(filePath, fs.readFileSync(file.path));
     const archivoUrl = `/uploads/${fileName}`;
 
     // 4. Guardar en PostgreSQL

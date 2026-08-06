@@ -50,6 +50,7 @@ model Conversacion {
   contactoId        String
   whatsappAccountId String
   asignadoA         String?
+  notaAsignacion    String?
 
   estado EstadoConversacion @default(nuevo)
 
