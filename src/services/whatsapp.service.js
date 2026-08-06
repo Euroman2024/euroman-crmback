@@ -40,38 +40,10 @@ class WhatsAppService {
     // Sessions directory configurable (use Persistent Volume in production)
     this.sessionsBase = process.env.SESSIONS_DIR || path.join(__dirname, '..', '..', 'sessions');
 
-    // Start a periodic watcher to detect accounts marked 'desconectado' in DB
-    this._startDisconnectedWatcher();
+    // (Watcher removed)
   }
 
-  _startDisconnectedWatcher() {
-    // Poll using configured interval
-    setInterval(async () => {
-      try {
-        const toReset = await prisma.whatsappAccount.findMany({ where: { estado: 'desconectado' } });
-        for (const acc of toReset) {
-          const id = acc.id;
-          if (this.pendingResets.has(id)) continue;
-          const sock = this.sessions.get(id);
-          if (sock) continue; // already have a running socket
-          this.pendingResets.add(id);
-          (async () => {
-            try {
-              const sessionDir = path.join(this.sessionsBase, id);
-              try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
-              await this.startSession(id);
-            } catch (err) {
-              console.error(`[Watcher] Failed to reset session for ${id}:`, err?.message || err);
-            } finally {
-              this.pendingResets.delete(id);
-            }
-          })();
-        }
-      } catch (err) {
-        console.error('[Watcher] Error checking disconnected accounts:', err);
-      }
-    }, this.pollInterval);
-  }
+  // Removed _startDisconnectedWatcher to prevent accidental session deletion
 
   async startSession(accountId) {
     // Destroy existing socket if it exists to prevent concurrent connections
@@ -219,13 +191,14 @@ class WhatsAppService {
         console.log(`[Baileys] Connection closed for account ${accountId}. Reconnecting:`, shouldReconnect, 'reason:', lastDisconnect?.error);
 
         try {
-          // Update DB state
-          await prisma.whatsappAccount.update({
-            where: { id: accountId },
-            data: { estado: 'desconectado' }
-          });
-
-          try { getIO().emit('status_changed', { accountId, status: 'desconectado' }); } catch (e) {}
+          if (!shouldReconnect) {
+            // Update DB state to desconectado ONLY if it's a permanent logout
+            await prisma.whatsappAccount.update({
+              where: { id: accountId },
+              data: { estado: 'desconectado' }
+            });
+            try { getIO().emit('status_changed', { accountId, status: 'desconectado' }); } catch (e) {}
+          }
 
           if (shouldReconnect) {
             // Exponential backoff reconnect
@@ -326,16 +299,9 @@ class WhatsAppService {
       const accounts = await prisma.whatsappAccount.findMany();
       console.log(`[Baileys] Found ${accounts.length} accounts. Initializing sessions...`);
       for (const acc of accounts) {
-        const sessionDir = path.join(this.sessionsBase, acc.id);
-        // If DB marks account as 'desconectado', force QR generation by removing saved session
-        if (acc.estado === 'desconectado') {
-          console.log(`[Baileys] Account ${acc.id} marked 'desconectado' in DB — forcing QR generation.`);
-          try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch(e){}
-          // Start session to generate QR
-          await this.startSession(acc.id);
-        } else {
-          await this.startSession(acc.id);
-        }
+        // ALWAYS try to restore the session. Do not delete the session folder just because the DB says 'desconectado'.
+        // If the session is truly invalid, Baileys will fire a loggedOut disconnect event which handles deletion.
+        await this.startSession(acc.id);
       }
     } catch (error) {
       console.error("[Baileys] Error restoring sessions on startup:", error);
