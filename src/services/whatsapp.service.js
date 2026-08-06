@@ -122,6 +122,21 @@ class WhatsAppService {
               const [lidId, lidDomain] = c.lidJid.split('@');
               const lidTelefono = `${lidId.split(':')[0]}@${lidDomain || 'lid'}`;
               await upsertContactData(lidTelefono, nombreReal, !!c.name);
+              
+              // Persist mapping
+              try {
+                const uploadsDir = path.join(__dirname, '..', '..', 'public', 'uploads');
+                if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+                const mapPath = path.join(uploadsDir, 'lidMap.json');
+                let lidMap = {};
+                if (fs.existsSync(mapPath)) {
+                  lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+                }
+                lidMap[lidTelefono] = telefono;
+                fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
+              } catch (err) {
+                console.error("Error saving lid mapping", err);
+              }
             }
           }
           console.log(`[Baileys] Sincronización de ${contacts.length} contactos finalizada.`);
@@ -161,6 +176,21 @@ class WhatsAppService {
           const [lidId, lidDomain] = c.lidJid.split('@');
           const lidTelefono = `${lidId.split(':')[0]}@${lidDomain || 'lid'}`;
           await upsertContactData(lidTelefono, nombreReal, !!c.name);
+          
+          // Persist mapping
+          try {
+            const uploadsDir = path.join(__dirname, '..', '..', 'public', 'uploads');
+            if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+            const mapPath = path.join(uploadsDir, 'lidMap.json');
+            let lidMap = {};
+            if (fs.existsSync(mapPath)) {
+              lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+            }
+            lidMap[lidTelefono] = telefono;
+            fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
+          } catch (err) {
+            console.error("Error saving lid mapping", err);
+          }
         }
       }
     });

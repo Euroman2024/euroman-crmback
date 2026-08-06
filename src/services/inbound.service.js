@@ -57,7 +57,22 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
 
       // Extraer número de teléfono preservando el dominio
       const [idPart, domainPart] = remoteJid.split('@');
-      const telefono = `${idPart.split(':')[0]}@${domainPart}`;
+      let telefono = `${idPart.split(':')[0]}@${domainPart}`;
+
+      // Resolve LID to real phone if mapped
+      if (domainPart === 'lid') {
+        try {
+          const mapPath = path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+          if (fs.existsSync(mapPath)) {
+            const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+            if (lidMap[telefono]) {
+              telefono = lidMap[telefono];
+            }
+          }
+        } catch (e) {
+          console.error("Error resolving lid mapping", e);
+        }
+      }
 
       // 1. Lógica de Contacto (Auto-creación)
       let contacto = await prisma.contacto.findUnique({
@@ -111,7 +126,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
           // Generar nombre único
           const ext = mimetype.split('/')[1]?.split(';')[0] || 'bin';
           const filename = `${uuidv4()}.${ext}`;
-          const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
+          const uploadDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
           
           // Crear la carpeta si no existe
           if (!fs.existsSync(uploadDir)) {
