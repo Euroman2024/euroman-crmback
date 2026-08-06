@@ -60,7 +60,7 @@ const getConversaciones = async (req, res) => {
     res.json(normalized);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Error al obtener conversaciones" });
+    res.status(500).json({ message: "Error al obtener conversaciones", error: error.message, stack: error.stack });
   }
 };
 
