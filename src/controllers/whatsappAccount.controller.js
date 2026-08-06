@@ -180,29 +180,47 @@ const logoutAccount = async (req, res) => {
   }
 };
 
-// Forzar reinicio de sesión: borrar directorio de sesión y reiniciar startSession
+// Forzar reinicio de sesión LIMPIO: cierra socket, borra directorio y genera nuevo QR
 const resetSession = async (req, res) => {
   try {
     const { id } = req.params;
     const account = await prisma.whatsappAccount.findUnique({ where: { id } });
     if (!account) return res.status(404).json({ message: 'Cuenta no encontrada' });
 
-    if (account.estado === 'conectado') {
-      return res.status(400).json({ message: 'Cuenta ya conectada' });
+    // 1. Cerrar socket existente si hay uno
+    const existingSock = whatsappService.sessions.get(id);
+    if (existingSock) {
+      try { existingSock.ev.removeAllListeners(); } catch(e) {}
+      try { existingSock.ws.close(); } catch(e) {}
+      whatsappService.sessions.delete(id);
     }
 
+    // 2. Cancelar timers de reconexión pendientes
+    if (whatsappService.reconnectTimers.has(id)) {
+      clearTimeout(whatsappService.reconnectTimers.get(id));
+      whatsappService.reconnectTimers.delete(id);
+    }
+
+    // 3. Borrar el directorio de sesión completamente
     const sessionDir = path.join(whatsappService.sessionsBase, id);
+    console.log(`[Reset] Borrando sesión: ${sessionDir}`);
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
+      console.log(`[Reset] Directorio borrado exitosamente`);
     }
 
-    // Remove from in-memory map if present
-    whatsappService.sessions.delete(id);
+    // 4. Marcar como desconectado en DB
+    await prisma.whatsappAccount.update({
+      where: { id },
+      data: { estado: 'desconectado' }
+    });
 
-    // Start session to generate QR
-    whatsappService.startSession(id);
+    // 5. Iniciar sesión limpia para generar nuevo QR
+    setTimeout(() => {
+      whatsappService.startSession(id).catch(console.error);
+    }, 500);
 
-    res.json({ message: 'Reinicio solicitado. Si hay QR se emitirá al frontend.' });
+    res.json({ message: 'Sesión reseteada. Generando nuevo QR...' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error interno al reiniciar sesión' });
