@@ -17,7 +17,7 @@ const PORT =
 
 const whatsappService = require('./services/whatsapp.service');
 
-server.listen(PORT, async () => {
+server.listen(PORT, '0.0.0.0', async () => {
 
   console.log(
     `Server running on ${PORT}`
