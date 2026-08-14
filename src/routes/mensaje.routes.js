@@ -10,4 +10,7 @@ router.post("/send", authMiddleware, sendMessage);
 // Enviar un archivo multimedia
 router.post("/send-media", authMiddleware, upload.single('file'), sendMedia);
 
+// Reenviar mensaje
+router.post("/forward", authMiddleware, require("../controllers/mensaje.controller").forwardMessage);
+
 module.exports = router;

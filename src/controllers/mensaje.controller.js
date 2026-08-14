@@ -229,7 +229,90 @@ const sendMedia = async (req, res) => {
   }
 };
 
+const forwardMessage = async (req, res) => {
+  try {
+    const { sourceMessageId, targetConversacionIds } = req.body;
+    if (!sourceMessageId || !targetConversacionIds || !targetConversacionIds.length) {
+      return res.status(400).json({ message: "Se requiere mensaje origen y al menos un chat destino" });
+    }
+
+    const sourceMessage = await prisma.mensaje.findUnique({ where: { id: sourceMessageId } });
+    if (!sourceMessage) return res.status(404).json({ message: "Mensaje origen no encontrado" });
+
+    // Send to each target conversation
+    for (const conversacionId of targetConversacionIds) {
+      const conversacion = await prisma.conversacion.findUnique({
+        where: { id: conversacionId },
+        include: { contacto: true, whatsappAccount: true }
+      });
+      if (!conversacion || conversacion.whatsappAccount.estado !== 'conectado') continue;
+
+      const { whatsappAccountId, contacto } = conversacion;
+      const telefono = contacto.telefono;
+      const jid = telefono.includes('@') ? telefono : `${telefono}@s.whatsapp.net`;
+      const sock = whatsappService.getSession(whatsappAccountId);
+      if (!sock) continue;
+
+      let messageContent = {};
+      
+      // If it has media, read it from disk
+      if (sourceMessage.archivoUrl) {
+        const filePath = path.join(__dirname, '..', '..', 'public', sourceMessage.archivoUrl);
+        if (fs.existsSync(filePath)) {
+          const buffer = fs.readFileSync(filePath);
+          const mimeType = sourceMessage.mimetype || 'application/octet-stream';
+          if (mimeType.startsWith('image/')) {
+            messageContent = { image: buffer, caption: sourceMessage.contenido || '' };
+          } else if (mimeType.startsWith('video/')) {
+            messageContent = { video: buffer, caption: sourceMessage.contenido || '' };
+          } else if (mimeType.startsWith('audio/')) {
+            messageContent = { audio: buffer, ptt: false };
+          } else {
+            const fileName = sourceMessage.archivoUrl.split('/').pop();
+            messageContent = { document: buffer, fileName: fileName, mimetype: mimeType, caption: sourceMessage.contenido || '' };
+          }
+        } else {
+          // Fallback to text if file is missing
+          messageContent = { text: sourceMessage.contenido || 'Archivo reenviado no disponible' };
+        }
+      } else {
+        messageContent = { text: sourceMessage.contenido };
+      }
+
+      await sock.sendMessage(jid, messageContent, { forward: true });
+
+      const nuevoMensaje = await prisma.mensaje.create({
+        data: {
+          conversacionId,
+          contenido: sourceMessage.contenido || '',
+          archivoUrl: sourceMessage.archivoUrl,
+          mimetype: sourceMessage.mimetype,
+          tipo: 'outgoing'
+        }
+      });
+
+      await prisma.conversacion.update({
+        where: { id: conversacionId },
+        data: { estado: 'respondido' }
+      });
+
+      try {
+        getIO().emit('message_sent', {
+          conversacionId,
+          mensaje: nuevoMensaje
+        });
+      } catch (e) {}
+    }
+
+    res.status(200).json({ message: "Mensajes reenviados correctamente" });
+  } catch (error) {
+    console.error("Error al reenviar mensaje:", error);
+    res.status(500).json({ message: "Error interno al reenviar mensaje" });
+  }
+};
+
 module.exports = {
   sendMessage,
-  sendMedia
+  sendMedia,
+  forwardMessage
 };
