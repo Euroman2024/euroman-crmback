@@ -12,16 +12,36 @@ async function mergeDuplicates() {
 
   console.log(`Encontrados ${lidContacts.length} contactos @lid para revisar.`);
 
-  for (const lidContact of lidContacts) {
-    if (!lidContact.nombre || lidContact.nombre.trim() === '') continue;
+  // Cargar lidMap
+  const fs = require('fs');
+  const path = require('path');
+  const mapPath = path.join(__dirname, 'public', 'uploads', 'lidMap.json');
+  let lidMap = {};
+  if (fs.existsSync(mapPath)) {
+    lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+  }
 
-    const mainContact = await prisma.contacto.findFirst({
-      where: {
-        nombre: lidContact.nombre,
-        telefono: { not: { endsWith: '@lid' } }
-      },
-      include: { conversaciones: true }
-    });
+  for (const lidContact of lidContacts) {
+    let mainContact = null;
+
+    // 1. Intentar por lidMap (el método más seguro y exacto)
+    if (lidMap[lidContact.telefono]) {
+      mainContact = await prisma.contacto.findUnique({
+        where: { telefono: lidMap[lidContact.telefono] },
+        include: { conversaciones: true }
+      });
+    }
+
+    // 2. Si no hay en lidMap, intentar por nombre (fallback de emergencia)
+    if (!mainContact && lidContact.nombre && lidContact.nombre.trim() !== '') {
+      mainContact = await prisma.contacto.findFirst({
+        where: {
+          nombre: lidContact.nombre,
+          telefono: { not: { endsWith: '@lid' } }
+        },
+        include: { conversaciones: true }
+      });
+    }
 
     if (mainContact) {
       console.log(`[MERGE] Fusionando '${lidContact.nombre}' (${lidContact.telefono}) -> (${mainContact.telefono})`);
