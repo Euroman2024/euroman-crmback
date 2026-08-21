@@ -257,7 +257,11 @@ const forwardMessage = async (req, res) => {
       
       // If it has media, read it from disk
       if (sourceMessage.archivoUrl) {
-        const filePath = path.join(__dirname, '..', '..', 'public', sourceMessage.archivoUrl);
+        // Use UPLOADS_DIR env var if set (Railway persistent volume), otherwise fallback to public folder
+        const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+        // archivoUrl is like "/uploads/filename.jpg", so strip the "/uploads/" prefix
+        const fileName = sourceMessage.archivoUrl.replace(/^\/uploads\//, '');
+        const filePath = path.join(uploadsDir, fileName);
         if (fs.existsSync(filePath)) {
           const buffer = fs.readFileSync(filePath);
           const mimeType = sourceMessage.mimetype || 'application/octet-stream';
@@ -268,18 +272,18 @@ const forwardMessage = async (req, res) => {
           } else if (mimeType.startsWith('audio/')) {
             messageContent = { audio: buffer, ptt: false };
           } else {
-            const fileName = sourceMessage.archivoUrl.split('/').pop();
             messageContent = { document: buffer, fileName: fileName, mimetype: mimeType, caption: sourceMessage.contenido || '' };
           }
         } else {
-          // Fallback to text if file is missing
+          // Fallback to text if file is missing on disk
           messageContent = { text: sourceMessage.contenido || 'Archivo reenviado no disponible' };
         }
       } else {
         messageContent = { text: sourceMessage.contenido };
       }
 
-      await sock.sendMessage(jid, messageContent, { forward: true });
+      // Do NOT pass { forward: true } — that bypasses the actual media buffer and only re-sends the original WA key
+      await sock.sendMessage(jid, messageContent);
 
       const nuevoMensaje = await prisma.mensaje.create({
         data: {
