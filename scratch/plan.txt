@@ -1,0 +1,3 @@
+// We need to listen to a message and log the raw Baileys payload.
+// Actually, I can just modify inbound.service.js to log raw LID messages.
+// But first, let's fix the problem that the user hates: the weird pushNames.

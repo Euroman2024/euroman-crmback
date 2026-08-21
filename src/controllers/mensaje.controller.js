@@ -81,12 +81,13 @@ const sendMessage = async (req, res) => {
       }
     }
 
-    await sock.sendMessage(jid, { text: contenido }, options);
+    const sentMsg = await sock.sendMessage(jid, { text: contenido }, options);
 
     // 4. Guardar en PostgreSQL
     const nuevoMensaje = await prisma.mensaje.create({
       data: {
         conversacionId,
+        whatsappMsgId: sentMsg?.key?.id,
         contenido,
         tipo: 'outgoing',
         quotedMensajeId: quotedMessageId || null,
@@ -180,7 +181,7 @@ const sendMedia = async (req, res) => {
       }
     }
 
-    await sock.sendMessage(jid, messageContent, options);
+    const sentMsg = await sock.sendMessage(jid, messageContent, options);
 
     // Si hay archivo, guardarlo en el servidor (o en UPLOADS_DIR) local
     const ext = path.extname(file.originalname);
@@ -197,6 +198,7 @@ const sendMedia = async (req, res) => {
     const nuevoMensaje = await prisma.mensaje.create({
       data: {
         conversacionId,
+        whatsappMsgId: sentMsg?.key?.id,
         contenido: contenido || '',
         archivoUrl,
         mimetype: mimeType,
@@ -283,11 +285,12 @@ const forwardMessage = async (req, res) => {
       }
 
       // Do NOT pass { forward: true } — that bypasses the actual media buffer and only re-sends the original WA key
-      await sock.sendMessage(jid, messageContent);
+      const sentMsg = await sock.sendMessage(jid, messageContent);
 
       const nuevoMensaje = await prisma.mensaje.create({
         data: {
           conversacionId,
+          whatsappMsgId: sentMsg?.key?.id,
           contenido: sourceMessage.contenido || '',
           archivoUrl: sourceMessage.archivoUrl,
           mimetype: sourceMessage.mimetype,

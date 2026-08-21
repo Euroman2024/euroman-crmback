@@ -111,7 +111,7 @@ class WhatsAppService {
             if (!nombreReal || isUnknownContactName(nombreReal)) continue;
 
             const remoteJid = c.id;
-            if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
+            if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast') || remoteJid.includes('@newsletter')) continue;
             
             const [idPart, domainPart] = remoteJid.split('@');
             const telefono = `${idPart.split(':')[0]}@${domainPart}`;
@@ -165,7 +165,7 @@ class WhatsAppService {
         const nombreReal = c.name || c.notify;
         if (!nombreReal || isUnknownContactName(nombreReal)) continue;
         const remoteJid = c.id;
-        if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) continue;
+        if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast') || remoteJid.includes('@newsletter')) continue;
         
         const [idPart, domainPart] = remoteJid.split('@');
         const telefono = `${idPart.split(':')[0]}@${domainPart}`;

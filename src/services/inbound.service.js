@@ -75,6 +75,11 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         }
       }
 
+      if (isLid && telefono.includes('@lid')) {
+        console.log("UNMAPPED LID MESSAGE RECEIVED! Raw payload:");
+        console.log(JSON.stringify(msg, null, 2));
+      }
+
       // 1. Lógica de Contacto (Auto-creación)
       let contacto = await prisma.contacto.findUnique({
         where: { telefono }
@@ -85,7 +90,10 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       if (!contacto && isLid && telefono.includes('@lid') && msg.pushName) {
         const byName = await prisma.contacto.findFirst({
           where: {
-            nombre: msg.pushName,
+            OR: [
+              { nombre: msg.pushName },
+              { nombre: `~${msg.pushName}` }
+            ],
             telefono: { endsWith: '@s.whatsapp.net' }
           }
         });
@@ -107,7 +115,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         contacto = await prisma.contacto.create({
           data: {
             telefono,
-            nombre: !isFromMe && msg.pushName ? msg.pushName : null,
+            nombre: !isFromMe && msg.pushName ? `~${msg.pushName}` : null,
             fotoPerfilUrl: null
           }
         });
@@ -127,7 +135,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         // Update name if missing
         contacto = await prisma.contacto.update({
           where: { id: contacto.id },
-          data: { nombre: msg.pushName }
+          data: { nombre: `~${msg.pushName}` }
         });
       }
 
