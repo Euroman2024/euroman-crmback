@@ -11,9 +11,12 @@ const isUnknownContactName = (name) => {
   return /^(desconocido|unknown|whatsapp business|whatsapp user|unregistered)$/i.test(String(name).trim());
 };
 
-const upsertContactData = async (telefono, nombreReal, allowOverwrite) => {
+const upsertContactData = async (telefono, nombreReal, allowOverwrite = false) => {
+  // Evitar crear contactos basura con el número vacío
+  if (!telefono || typeof telefono !== 'string' || telefono.trim() === '') return;
+
   try {
-    const existingContact = await prisma.contacto.findUnique({ where: { telefono } });
+    let existingContact = await prisma.contacto.findUnique({ where: { telefono } });
     if (!existingContact) {
       await prisma.contacto.create({ data: { telefono, nombre: nombreReal } });
     } else {
@@ -24,6 +27,38 @@ const upsertContactData = async (telefono, nombreReal, allowOverwrite) => {
       }
     }
   } catch(e) {}
+};
+
+const mergeLidContact = async (lidTelefono, realTelefono) => {
+  try {
+    const lidContact = await prisma.contacto.findUnique({ where: { telefono: lidTelefono }, include: { conversaciones: true } });
+    const realContact = await prisma.contacto.findUnique({ where: { telefono: realTelefono }, include: { conversaciones: true } });
+    
+    if (lidContact && realContact) {
+      if (lidContact.conversaciones.length > 0 && realContact.conversaciones.length > 0) {
+        await prisma.mensaje.updateMany({
+          where: { conversacionId: lidContact.conversaciones[0].id },
+          data: { conversacionId: realContact.conversaciones[0].id }
+        });
+        await prisma.conversacion.delete({ where: { id: lidContact.conversaciones[0].id } });
+      } else if (lidContact.conversaciones.length > 0) {
+        await prisma.conversacion.update({
+          where: { id: lidContact.conversaciones[0].id },
+          data: { contactoId: realContact.id }
+        });
+      }
+      await prisma.contacto.delete({ where: { id: lidContact.id } });
+      console.log(`[Auto-Merge] Fusión completada: LID ${lidTelefono} unido a real ${realTelefono}`);
+    } else if (lidContact && !realContact) {
+      await prisma.contacto.update({
+        where: { id: lidContact.id },
+        data: { telefono: realTelefono }
+      });
+      console.log(`[Auto-Merge] Renombrado: LID ${lidTelefono} pasó a ser ${realTelefono}`);
+    }
+  } catch (e) {
+    console.error("[Auto-Merge] Error durante la fusión de contactos:", e);
+  }
 };
 
 class WhatsAppService {
@@ -121,7 +156,9 @@ class WhatsAppService {
             if (c.lidJid) {
               const [lidId, lidDomain] = c.lidJid.split('@');
               const lidTelefono = `${lidId.split(':')[0]}@${lidDomain || 'lid'}`;
-              await upsertContactData(lidTelefono, nombreReal, !!c.name);
+              
+              // NO crear el contacto LID de nuevo. En su lugar, ejecutar auto-merge si existe:
+              await mergeLidContact(lidTelefono, telefono);
               
               // Persist mapping
               try {
@@ -175,7 +212,9 @@ class WhatsAppService {
         if (c.lidJid) {
           const [lidId, lidDomain] = c.lidJid.split('@');
           const lidTelefono = `${lidId.split(':')[0]}@${lidDomain || 'lid'}`;
-          await upsertContactData(lidTelefono, nombreReal, !!c.name);
+          
+          // NO crear el contacto LID. Ejecutar auto-merge si existe:
+          await mergeLidContact(lidTelefono, telefono);
           
           // Persist mapping
           try {

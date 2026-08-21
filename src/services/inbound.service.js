@@ -62,16 +62,23 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
 
       // Resolve LID to real phone if mapped
       if (isLid) {
+        console.log(`[LID DEBUG] Incoming LID message from: ${telefono}`);
         try {
-          const mapPath = path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+          const mapPath = process.env.UPLOADS_DIR ? path.join(process.env.UPLOADS_DIR, 'lidMap.json') : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+          console.log(`[LID DEBUG] Checking lidMap at: ${mapPath}`);
           if (fs.existsSync(mapPath)) {
             const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
             if (lidMap[telefono]) {
+              console.log(`[LID DEBUG] Successfully mapped ${telefono} to ${lidMap[telefono]}`);
               telefono = lidMap[telefono];
+            } else {
+              console.log(`[LID DEBUG] No mapping found in lidMap.json for ${telefono}`);
             }
+          } else {
+            console.log(`[LID DEBUG] lidMap.json does NOT exist at ${mapPath}`);
           }
         } catch (e) {
-          console.error("Error resolving lid mapping", e);
+          console.error("[LID DEBUG] Error resolving lid mapping", e);
         }
       }
 
