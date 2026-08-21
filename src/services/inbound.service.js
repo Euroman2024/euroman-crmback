@@ -44,8 +44,8 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       const isFromMe = msg.key.fromMe;
       const whatsappMsgId = msg.key.id;
       
-      // Filtros: Ignorar mensajes de grupos o de estados
-      if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) {
+      // Filtros: Ignorar mensajes de grupos, estados o canales de WhatsApp
+      if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast') || remoteJid.includes('@newsletter')) {
         continue;
       }
 
@@ -58,9 +58,10 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       // Extraer número de teléfono preservando el dominio
       const [idPart, domainPart] = remoteJid.split('@');
       let telefono = `${idPart.split(':')[0]}@${domainPart}`;
+      const isLid = domainPart === 'lid';
 
       // Resolve LID to real phone if mapped
-      if (domainPart === 'lid') {
+      if (isLid) {
         try {
           const mapPath = path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
           if (fs.existsSync(mapPath)) {
@@ -79,11 +80,34 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         where: { telefono }
       });
 
+      // Si el JID es @lid y no encontramos el contacto por teléfono,
+      // buscar por pushName para evitar crear duplicados
+      if (!contacto && isLid && telefono.includes('@lid') && msg.pushName) {
+        const byName = await prisma.contacto.findFirst({
+          where: {
+            nombre: msg.pushName,
+            telefono: { endsWith: '@s.whatsapp.net' }
+          }
+        });
+        if (byName) {
+          // Guardar el mapeo @lid -> @s.whatsapp.net para mensajes futuros
+          try {
+            const mapPath = path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+            const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
+            lidMap[telefono] = byName.telefono;
+            fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
+          } catch (e) {}
+          // Usar el contacto existente con número real
+          contacto = byName;
+          telefono = byName.telefono;
+        }
+      }
+
       if (!contacto) {
         contacto = await prisma.contacto.create({
           data: {
             telefono,
-            nombre: msg.pushName || null,
+            nombre: !isFromMe && msg.pushName ? msg.pushName : null,
             fotoPerfilUrl: null
           }
         });
@@ -99,7 +123,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
             }
           }).catch(() => {});
         }
-      } else if (!contacto.nombre && msg.pushName) {
+      } else if (!contacto.nombre && !isFromMe && msg.pushName) {
         // Update name if missing
         contacto = await prisma.contacto.update({
           where: { id: contacto.id },
@@ -121,6 +145,12 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
           const mediaType = Object.keys(msg.message).find(k => k.includes('Message'));
           mimetype = msg.message[mediaType]?.mimetype || '';
           
+          // Leer el caption (texto que acompaña a la imagen/video/documento)
+          const caption = msg.message[mediaType]?.caption || '';
+          if (caption && !contenido) {
+            contenido = caption;
+          }
+          
           const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: console });
           
           // Generar nombre único
@@ -137,6 +167,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
           fs.writeFileSync(filepath, buffer);
           archivoUrl = `/uploads/${filename}`;
           
+          // Solo poner [image]/[video]/etc si no hay caption ni texto previo
           if (!contenido) contenido = `[${mediaType.replace('Message', '')}]`;
         } catch (err) {
           console.error("Error descargando media:", err);

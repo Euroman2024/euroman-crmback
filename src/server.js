@@ -31,6 +31,14 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.error('Error in fixLidContacts:', err);
   }
 
+  // Fusionar contactos @lid duplicados contra @s.whatsapp.net por nombre
+  try {
+    const { mergeDuplicates } = require('../cleanup-duplicates');
+    if (mergeDuplicates) await mergeDuplicates();
+  } catch (err) {
+    // cleanup-duplicates.js puede no exportar la función si se ejecuta como script
+  }
+
   // Iniciar todas las sesiones guardadas
   await whatsappService.restoreSessions();
 

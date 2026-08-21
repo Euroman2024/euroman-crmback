@@ -315,8 +315,84 @@ const forwardMessage = async (req, res) => {
   }
 };
 
+const editMessage = async (req, res) => {
+  try {
+    const { mensajeId } = req.params;
+    const { contenido } = req.body;
+    if (!contenido?.trim()) return res.status(400).json({ message: "El contenido no puede estar vacío" });
+
+    const mensaje = await prisma.mensaje.findUnique({ where: { id: mensajeId } });
+    if (!mensaje) return res.status(404).json({ message: "Mensaje no encontrado" });
+    if (mensaje.tipo !== 'outgoing') return res.status(403).json({ message: "Solo puedes editar mensajes enviados por ti" });
+
+    // Editar en WhatsApp si es posible
+    try {
+      const conversacion = await prisma.conversacion.findUnique({
+        where: { id: mensaje.conversacionId },
+        include: { contacto: true, whatsappAccount: true }
+      });
+      if (conversacion && conversacion.whatsappAccount.estado === 'conectado' && mensaje.whatsappMsgId) {
+        const sock = whatsappService.getSession(conversacion.whatsappAccountId);
+        const jid = conversacion.contacto.telefono.includes('@') ? conversacion.contacto.telefono : `${conversacion.contacto.telefono}@s.whatsapp.net`;
+        if (sock) {
+          await sock.sendMessage(jid, {
+            edit: { remoteJid: jid, fromMe: true, id: mensaje.whatsappMsgId },
+            text: contenido
+          });
+        }
+      }
+    } catch (e) { console.error("Error editando en WA:", e.message); }
+
+    const updated = await prisma.mensaje.update({
+      where: { id: mensajeId },
+      data: { contenido, editado: true }
+    });
+
+    try { getIO().emit('message_edited', { mensajeId, contenido, conversacionId: mensaje.conversacionId }); } catch (e) {}
+    res.status(200).json(updated);
+  } catch (error) {
+    console.error("Error al editar mensaje:", error);
+    res.status(500).json({ message: "Error interno al editar" });
+  }
+};
+
+const deleteMessage = async (req, res) => {
+  try {
+    const { mensajeId } = req.params;
+    const { forEveryone = true } = req.body;
+
+    const mensaje = await prisma.mensaje.findUnique({ where: { id: mensajeId } });
+    if (!mensaje) return res.status(404).json({ message: "Mensaje no encontrado" });
+
+    // Eliminar en WhatsApp si es posible
+    try {
+      const conversacion = await prisma.conversacion.findUnique({
+        where: { id: mensaje.conversacionId },
+        include: { contacto: true, whatsappAccount: true }
+      });
+      if (conversacion && conversacion.whatsappAccount.estado === 'conectado' && mensaje.whatsappMsgId) {
+        const sock = whatsappService.getSession(conversacion.whatsappAccountId);
+        const jid = conversacion.contacto.telefono.includes('@') ? conversacion.contacto.telefono : `${conversacion.contacto.telefono}@s.whatsapp.net`;
+        if (sock) {
+          await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: true, id: mensaje.whatsappMsgId } });
+        }
+      }
+    } catch (e) { console.error("Error borrando en WA:", e.message); }
+
+    await prisma.mensaje.delete({ where: { id: mensajeId } });
+
+    try { getIO().emit('message_deleted', { mensajeId, conversacionId: mensaje.conversacionId }); } catch (e) {}
+    res.status(200).json({ message: "Mensaje eliminado" });
+  } catch (error) {
+    console.error("Error al eliminar mensaje:", error);
+    res.status(500).json({ message: "Error interno al eliminar" });
+  }
+};
+
 module.exports = {
   sendMessage,
   sendMedia,
-  forwardMessage
+  forwardMessage,
+  editMessage,
+  deleteMessage
 };

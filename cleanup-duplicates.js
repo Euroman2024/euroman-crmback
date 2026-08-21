@@ -70,4 +70,10 @@ async function mergeDuplicates() {
   console.log('Duplicate merge complete.');
 }
 
-mergeDuplicates().catch(console.error).finally(() => prisma.$disconnect());
+// Exportar para uso desde server.js
+module.exports = { mergeDuplicates };
+
+// Ejecutar directamente solo si es llamado como script
+if (require.main === module) {
+  mergeDuplicates().catch(console.error).finally(() => prisma.$disconnect());
+}
