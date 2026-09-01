@@ -32,30 +32,39 @@ const upsertContactData = async (telefono, nombreReal, allowOverwrite = false) =
 const mergeLidContact = async (lidTelefono, realTelefono) => {
   try {
     const lidContact = await prisma.contacto.findUnique({ where: { telefono: lidTelefono }, include: { conversaciones: true } });
+    if (!lidContact) return;
+
     const realContact = await prisma.contacto.findUnique({ where: { telefono: realTelefono }, include: { conversaciones: true } });
-    
-    if (lidContact && realContact) {
-      if (lidContact.conversaciones.length > 0 && realContact.conversaciones.length > 0) {
+
+    if (!realContact) {
+      // No existe contacto real todavía: el contacto LID pasa a ser el real
+      await prisma.contacto.update({ where: { id: lidContact.id }, data: { telefono: realTelefono } });
+      console.log(`[Auto-Merge] Renombrado: LID ${lidTelefono} pasó a ser ${realTelefono}`);
+      return;
+    }
+
+    // Con varias líneas centralizadas, un contacto puede tener una conversación
+    // por cada cuenta de WhatsApp: hay que fusionar cada una, no solo la primera.
+    for (const lidConv of lidContact.conversaciones) {
+      const realConv = realContact.conversaciones.find(c => c.whatsappAccountId === lidConv.whatsappAccountId);
+      if (realConv) {
         await prisma.mensaje.updateMany({
-          where: { conversacionId: lidContact.conversaciones[0].id },
-          data: { conversacionId: realContact.conversaciones[0].id }
+          where: { conversacionId: lidConv.id },
+          data: { conversacionId: realConv.id }
         });
-        await prisma.conversacion.delete({ where: { id: lidContact.conversaciones[0].id } });
-      } else if (lidContact.conversaciones.length > 0) {
+        await prisma.conversacion.delete({ where: { id: lidConv.id } });
+        // Notificar al frontend para que elimine el chat fantasma y redirija al chat real
+        try { getIO().emit('conversation_merged', { oldId: lidConv.id, newId: realConv.id }); } catch(_) {}
+      } else {
         await prisma.conversacion.update({
-          where: { id: lidContact.conversaciones[0].id },
+          where: { id: lidConv.id },
           data: { contactoId: realContact.id }
         });
       }
-      await prisma.contacto.delete({ where: { id: lidContact.id } });
-      console.log(`[Auto-Merge] Fusión completada: LID ${lidTelefono} unido a real ${realTelefono}`);
-    } else if (lidContact && !realContact) {
-      await prisma.contacto.update({
-        where: { id: lidContact.id },
-        data: { telefono: realTelefono }
-      });
-      console.log(`[Auto-Merge] Renombrado: LID ${lidTelefono} pasó a ser ${realTelefono}`);
     }
+
+    await prisma.contacto.delete({ where: { id: lidContact.id } });
+    console.log(`[Auto-Merge] Fusión completada: LID ${lidTelefono} unido a real ${realTelefono}`);
   } catch (e) {
     console.error("[Auto-Merge] Error durante la fusión de contactos:", e);
   }
@@ -379,4 +388,6 @@ class WhatsAppService {
 }
 
 // Export as singleton
-module.exports = new WhatsAppService();
+const whatsappServiceInstance = new WhatsAppService();
+whatsappServiceInstance.mergeLidContact = mergeLidContact;
+module.exports = whatsappServiceInstance;

@@ -119,13 +119,22 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       }
 
       if (!contacto) {
-        contacto = await prisma.contacto.create({
-          data: {
-            telefono,
-            nombre: !isFromMe && msg.pushName ? `~${msg.pushName}` : null,
-            fotoPerfilUrl: null
+        try {
+          contacto = await prisma.contacto.create({
+            data: {
+              telefono,
+              nombre: !isFromMe && msg.pushName ? `~${msg.pushName}` : null,
+              fotoPerfilUrl: null
+            }
+          });
+        } catch (e) {
+          // Condición de carrera: otro mensaje concurrente ya creó este contacto
+          if (e.code === 'P2002') {
+            contacto = await prisma.contacto.findUnique({ where: { telefono } });
+          } else {
+            throw e;
           }
-        });
+        }
 
         // Obtener foto de perfil en segundo plano sin bloquear
         if (!isFromMe && sock) {
@@ -192,34 +201,34 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
 
       if (!contenido && !archivoUrl) continue;
 
-      // 2. Lógica de Conversación
-      let conversacion = await prisma.conversacion.findFirst({
+      // 2. Lógica de Conversación (upsert atómico: la BD garantiza que nunca
+      // se creen dos conversaciones para el mismo contacto+cuenta, incluso
+      // si dos mensajes llegan casi al mismo tiempo)
+      let conversacion = await prisma.conversacion.upsert({
         where: {
+          contactoId_whatsappAccountId: {
+            contactoId: contacto.id,
+            whatsappAccountId: accountId
+          }
+        },
+        create: {
           contactoId: contacto.id,
-          whatsappAccountId: accountId
-        }
+          whatsappAccountId: accountId,
+          estado: isFromMe ? 'leido' : 'nuevo'
+        },
+        update: {}
       });
 
-      if (!conversacion) {
-        conversacion = await prisma.conversacion.create({
-          data: {
-            contactoId: contacto.id,
-            whatsappAccountId: accountId,
-            estado: isFromMe ? 'leido' : 'nuevo'
-          }
+      if (!isFromMe && conversacion.estado !== 'nuevo') {
+        conversacion = await prisma.conversacion.update({
+          where: { id: conversacion.id },
+          data: { estado: 'nuevo' }
         });
-      } else {
-        if (!isFromMe) {
-          conversacion = await prisma.conversacion.update({
-            where: { id: conversacion.id },
-            data: { estado: 'nuevo' }
-          });
-        } else if (conversacion.estado === 'nuevo') {
-          conversacion = await prisma.conversacion.update({
-            where: { id: conversacion.id },
-            data: { estado: 'leido' }
-          });
-        }
+      } else if (isFromMe && conversacion.estado === 'nuevo') {
+        conversacion = await prisma.conversacion.update({
+          where: { id: conversacion.id },
+          data: { estado: 'leido' }
+        });
       }
 
       let quotedMensajeId = null;

@@ -64,6 +64,8 @@ model Conversacion {
   usuario Usuario? @relation("UsuarioConversaciones", fields: [asignadoA], references: [id])
 
   mensajes Mensaje[]
+
+  @@unique([contactoId, whatsappAccountId])
 }
 
 model Mensaje {
