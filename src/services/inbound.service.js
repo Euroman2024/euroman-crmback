@@ -121,7 +121,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       // Intentamos resolver el código anónimo (@lid) al número real en este orden:
       // 1. Revisar el archivo lidMap.json (más rápido, cargado una vez por mensaje)
       // 2. Revisar la BD por un marcador MERGED_TO en el contacto con ese LID
-      // Si tras todo esto el LID sigue sin resolverse, se registra como contacto LID nuevo.
+      // 3. Si fromMe y sin resolver -> SKIP (no crear contacto fantasma)
       if (isLid) {
         let resolved = false;
         try {
@@ -152,14 +152,41 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
             }
           }
 
+          // Paso 3: Intentar resolución por participantJid (mensajes desde multidispositivo)
+          if (!resolved && msg.key.participant) {
+            const participantJid = msg.key.participant;
+            const [pId] = participantJid.split('@');
+            const realTel = `${pId.split(':')[0]}@s.whatsapp.net`;
+            const realContacto = await prisma.contacto.findUnique({ where: { telefono: realTel } });
+            if (realContacto && !realContacto.nombre?.startsWith('MERGED_TO:')) {
+              console.log(`[LID] participant resolve: ${telefono} -> ${realTel}`);
+              // Save to map for next time
+              try {
+                const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
+                lidMap[`${idPart.split(':')[0]}@lid`] = realTel;
+                fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
+              } catch(_) {}
+              telefono = realTel;
+              resolved = true;
+            }
+          }
+
           if (!resolved) {
-            console.log(`[LID] UNMAPPED: ${telefono}. pushName: ${msg.pushName}`);
+            if (isFromMe) {
+              // CRÍTICO: Si YO envié el mensaje desde mi teléfono y el LID no está mapeado,
+              // NO crear un contacto fantasma. El mensaje llegará de nuevo cuando se sincronice
+              // el historial de contactos y se resuelva el LID.
+              console.log(`[LID] SKIP fromMe unmapped LID: ${telefono}. Will be resolved on contacts.upsert.`);
+              continue;
+            }
+            console.log(`[LID] UNMAPPED incoming: ${telefono}. pushName: ${msg.pushName}`);
           }
         } catch (e) {
           console.error('[LID] Error resolving LID:', e.message);
         }
       }
       // ===========================================================
+
 
       // 1. Extraer contenido y archivos PRIMERO para descartar mensajes de sistema sin contenido
       // Primero desenvolver cualquier capa especial de WhatsApp (viewOnce, ephemeral, etc.)
