@@ -115,33 +115,51 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       const [idPart, domainPart] = remoteJid.split('@');
       let telefono = `${idPart.split(':')[0]}@${domainPart}`;
       const isLid = domainPart === 'lid';
+      const mapPath = process.env.UPLOADS_DIR ? path.join(process.env.UPLOADS_DIR, 'lidMap.json') : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
 
-      // Resolve LID to real phone if mapped
+      // ==================== RESOLUCION DE LID ====================
+      // Intentamos resolver el código anónimo (@lid) al número real en este orden:
+      // 1. Revisar el archivo lidMap.json (más rápido, cargado una vez por mensaje)
+      // 2. Revisar la BD por un marcador MERGED_TO en el contacto con ese LID
+      // Si tras todo esto el LID sigue sin resolverse, se registra como contacto LID nuevo.
       if (isLid) {
-        console.log(`[LID DEBUG] Incoming LID message from: ${telefono}`);
+        let resolved = false;
         try {
-          const mapPath = process.env.UPLOADS_DIR ? path.join(process.env.UPLOADS_DIR, 'lidMap.json') : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
-          console.log(`[LID DEBUG] Checking lidMap at: ${mapPath}`);
+          // Paso 1: lidMap.json
           if (fs.existsSync(mapPath)) {
             const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
             if (lidMap[telefono]) {
-              console.log(`[LID DEBUG] Successfully mapped ${telefono} to ${lidMap[telefono]}`);
+              console.log(`[LID] lidMap.json: ${telefono} -> ${lidMap[telefono]}`);
               telefono = lidMap[telefono];
-            } else {
-              console.log(`[LID DEBUG] No mapping found in lidMap.json for ${telefono}`);
+              resolved = true;
             }
-          } else {
-            console.log(`[LID DEBUG] lidMap.json does NOT exist at ${mapPath}`);
+          }
+
+          // Paso 2: Buscar en DB directamente el contacto con ese telefono @lid
+          if (!resolved) {
+            const lidContacto = await prisma.contacto.findUnique({ where: { telefono } });
+            if (lidContacto && lidContacto.nombre && lidContacto.nombre.startsWith('MERGED_TO:')) {
+              const realTelefono = lidContacto.nombre.replace('MERGED_TO:', '').trim();
+              console.log(`[LID] DB MERGED_TO: ${telefono} -> ${realTelefono}`);
+              telefono = realTelefono;
+              resolved = true;
+              // Actualizar lidMap.json para evitar la consulta a BD la próxima vez
+              try {
+                const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
+                lidMap[`${idPart.split(':')[0]}@lid`] = realTelefono;
+                fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
+              } catch(_) {}
+            }
+          }
+
+          if (!resolved) {
+            console.log(`[LID] UNMAPPED: ${telefono}. pushName: ${msg.pushName}`);
           }
         } catch (e) {
-          console.error("[LID DEBUG] Error resolving lid mapping", e);
+          console.error('[LID] Error resolving LID:', e.message);
         }
       }
-
-      if (isLid && telefono.includes('@lid')) {
-        console.log("UNMAPPED LID MESSAGE RECEIVED! Raw payload:");
-        console.log(JSON.stringify(msg, null, 2));
-      }
+      // ===========================================================
 
       // 1. Extraer contenido y archivos PRIMERO para descartar mensajes de sistema sin contenido
       // Primero desenvolver cualquier capa especial de WhatsApp (viewOnce, ephemeral, etc.)
@@ -202,16 +220,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         where: { telefono }
       });
 
-      // NOVEDAD: Leer el mapeo persistente directo desde la Base de Datos
-      if (contacto && contacto.nombre && contacto.nombre.startsWith('MERGED_TO:')) {
-        const realTelefono = contacto.nombre.replace('MERGED_TO:', '').trim();
-        console.log(`[LID DEBUG] DB Redirect: ${telefono} -> ${realTelefono}`);
-        telefono = realTelefono;
-        contacto = await prisma.contacto.findUnique({ where: { telefono } });
-      }
-
-      // Si el JID es @lid y no encontramos el contacto por teléfono,
-      // buscar por pushName para evitar crear duplicados
+      // Si el JID es @lid y NO fue resuelto antes por lidMap/DB, buscar por pushName
       if (!contacto && isLid && telefono.includes('@lid') && msg.pushName) {
         const byName = await prisma.contacto.findFirst({
           where: {
