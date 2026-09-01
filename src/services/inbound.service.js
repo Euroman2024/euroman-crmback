@@ -31,6 +31,62 @@ const formatPhoneForDisplay = (value) => {
   return `${countryCode ? `+${countryCode} ` : ''}${groups.join(' ')}`.trim();
 };
 
+// Tipos de envolturas que WhatsApp usa para mensajes especiales.
+// Hay que desenvolver para llegar al mensaje real (imageMessage, videoMessage, etc.)
+const WRAPPER_TYPES = [
+  'ephemeralMessage',
+  'viewOnceMessage',
+  'viewOnceMessageV2',
+  'viewOnceMessageV2Extension',
+  'documentWithCaptionMessage',
+  'editedMessage',
+  'reactionMessage',
+];
+
+// Desenvuelve capas de mensajes especiales de WhatsApp hasta llegar
+// al contenido real (imageMessage, videoMessage, audioMessage, etc.)
+const extractRealMessage = (msgObj) => {
+  if (!msgObj) return msgObj;
+  for (const wrapperKey of WRAPPER_TYPES) {
+    if (msgObj[wrapperKey]) {
+      // Los wrappers suelen tener el mensaje real en .message
+      const inner = msgObj[wrapperKey]?.message || msgObj[wrapperKey];
+      return extractRealMessage(inner);
+    }
+  }
+  return msgObj;
+};
+
+// Extrae la clave del tipo de media real del objeto de mensaje
+const MEDIA_TYPES = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'];
+const getMediaType = (realMsg) => {
+  if (!realMsg) return null;
+  return MEDIA_TYPES.find(t => realMsg[t]) || null;
+};
+
+// Convierte mimetype a extensión de archivo de forma segura
+const mimetypeToExt = (mimetype = '') => {
+  const base = mimetype.split(';')[0].trim();
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'video/mpeg': 'mpeg',
+    'audio/ogg; codecs=opus': 'ogg',
+    'audio/ogg': 'ogg',
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'application/pdf': 'pdf',
+    'application/zip': 'zip',
+  };
+  if (map[base]) return map[base];
+  // fallback: tomar la parte despues de /
+  return base.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'bin';
+};
+
 const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
   try {
     const { messages, type } = messageUpsert;
@@ -158,44 +214,53 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       // Mover la creación de conversación más abajo
 
       // Extraer contenido y archivos
-      let contenido = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+      // Primero desenvolver cualquier capa especial de WhatsApp (viewOnce, ephemeral, etc.)
+      const realMsg = extractRealMessage(msg.message);
+      let contenido = realMsg?.conversation || realMsg?.extendedTextMessage?.text || 
+                      msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
       let archivoUrl = null;
       let mimetype = null;
 
-      const isMedia = msg.message.imageMessage || msg.message.documentMessage || msg.message.videoMessage || msg.message.audioMessage || msg.message.stickerMessage;
+      const mediaType = getMediaType(realMsg);
+      const isMedia = !!mediaType;
       
       if (isMedia) {
         try {
-          const mediaType = Object.keys(msg.message).find(k => k.includes('Message'));
-          mimetype = msg.message[mediaType]?.mimetype || '';
+          mimetype = realMsg[mediaType]?.mimetype || '';
           
           // Leer el caption (texto que acompaña a la imagen/video/documento)
-          const caption = msg.message[mediaType]?.caption || '';
+          const caption = realMsg[mediaType]?.caption || '';
           if (caption && !contenido) {
             contenido = caption;
           }
           
-          const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: console });
+          // downloadMediaMessage necesita el msg original (con la clave del wrapper intacta)
+          const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: { level: 'silent', ...console, trace: () => {}, debug: () => {} } });
           
-          // Generar nombre único
-          const ext = mimetype.split('/')[1]?.split(';')[0] || 'bin';
-          const filename = `${uuidv4()}.${ext}`;
-          const uploadDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
-          
-          // Crear la carpeta si no existe
-          if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
+          if (buffer && buffer.length > 0) {
+            // Generar nombre único con extensión correcta
+            const ext = mimetypeToExt(mimetype);
+            const filename = `${uuidv4()}.${ext}`;
+            const uploadDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+            
+            // Crear la carpeta si no existe
+            if (!fs.existsSync(uploadDir)) {
+              fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            
+            const filepath = path.join(uploadDir, filename);
+            fs.writeFileSync(filepath, buffer);
+            archivoUrl = `/uploads/${filename}`;
+            console.log(`[Media] Guardado: ${filename} (${mimetype}, ${buffer.length} bytes)`);
+          } else {
+            console.warn(`[Media] Buffer vacío para ${mediaType}, omitiendo archivo.`);
           }
-          
-          const filepath = path.join(uploadDir, filename);
-          fs.writeFileSync(filepath, buffer);
-          archivoUrl = `/uploads/${filename}`;
           
           // Solo poner [image]/[video]/etc si no hay caption ni texto previo
           if (!contenido) contenido = `[${mediaType.replace('Message', '')}]`;
         } catch (err) {
-          console.error("Error descargando media:", err);
-          if (!contenido) contenido = "[Error al descargar archivo]";
+          console.error(`[Media] Error descargando ${mediaType}:`, err.message);
+          if (!contenido) contenido = `[${mediaType?.replace('Message', '') || 'archivo'}]`;
         }
       }
 

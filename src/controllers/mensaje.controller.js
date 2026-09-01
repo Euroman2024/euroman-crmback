@@ -57,7 +57,9 @@ const sendMessage = async (req, res) => {
       try {
         getIO().emit('message_sent', {
           conversacionId,
-          mensaje: nuevoMensaje
+          mensaje: nuevoMensaje,
+          contacto,
+          whatsappAccountId
         });
       } catch (e) {
          console.error("Error al emitir socket de nota interna:", e.message);
@@ -105,7 +107,9 @@ const sendMessage = async (req, res) => {
     try {
       getIO().emit('message_sent', {
         conversacionId,
-        mensaje: nuevoMensaje
+        mensaje: nuevoMensaje,
+        contacto,
+        whatsappAccountId
       });
     } catch (e) {
        console.error("Error al emitir socket:", e.message);
@@ -218,7 +222,9 @@ const sendMedia = async (req, res) => {
     try {
       getIO().emit('message_sent', {
         conversacionId,
-        mensaje: nuevoMensaje
+        mensaje: nuevoMensaje,
+        contacto,
+        whatsappAccountId
       });
     } catch (e) {}
 
@@ -306,7 +312,9 @@ const forwardMessage = async (req, res) => {
       try {
         getIO().emit('message_sent', {
           conversacionId,
-          mensaje: nuevoMensaje
+          mensaje: nuevoMensaje,
+          contacto,
+          whatsappAccountId
         });
       } catch (e) {}
     }

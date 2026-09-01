@@ -70,6 +70,48 @@ const mergeLidContact = async (lidTelefono, realTelefono) => {
   }
 };
 
+// Limpieza de contactos LID huérfanos al inicio de la sesión.
+// Lee el lidMap.json y fusiona cualquier @lid que siga en la BD con su número real.
+const cleanupOrphanLidContacts = async () => {
+  try {
+    const mapPath = process.env.UPLOADS_DIR
+      ? path.join(process.env.UPLOADS_DIR, 'lidMap.json')
+      : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+
+    if (!fs.existsSync(mapPath)) return;
+
+    const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+    const lidEntries = Object.entries(lidMap); // [ [lidJid, realJid], ... ]
+
+    if (lidEntries.length === 0) return;
+
+    // Buscar en la BD todos los contactos que todavía tengan un JID @lid
+    const orphans = await prisma.contacto.findMany({
+      where: { telefono: { endsWith: '@lid' } }
+    });
+
+    if (orphans.length === 0) {
+      console.log('[Startup Cleanup] No hay contactos LID huérfanos en la BD.');
+      return;
+    }
+
+    console.log(`[Startup Cleanup] Encontrados ${orphans.length} contactos @lid huérfanos. Fusionando...`);
+
+    for (const orphan of orphans) {
+      const realTelefono = lidMap[orphan.telefono];
+      if (realTelefono) {
+        await mergeLidContact(orphan.telefono, realTelefono);
+      } else {
+        console.log(`[Startup Cleanup] Sin mapeo para ${orphan.telefono}, se omite.`);
+      }
+    }
+
+    console.log('[Startup Cleanup] Limpieza de LIDs huérfanos completada.');
+  } catch (e) {
+    console.error('[Startup Cleanup] Error en limpieza de LIDs:', e.message);
+  }
+};
+
 class WhatsAppService {
   constructor() {
     this.sessions = new Map(); // Store active sessions by accountId
@@ -353,6 +395,12 @@ class WhatsAppService {
           }
           
           try { getIO().emit('status_changed', { accountId, status: 'conectado' }); } catch (e) {}
+
+          // Limpiar en segundo plano contactos @lid huérfanos (duplicados viejos)
+          // sin bloquear la conexión principal.
+          cleanupOrphanLidContacts().catch(e =>
+            console.error('[Startup Cleanup] Error en segundo plano:', e.message)
+          );
 
           // Reset retry counter on successful open
           this.startRetries.set(accountId, 0);
