@@ -63,10 +63,15 @@ const mergeLidContact = async (lidTelefono, realTelefono) => {
       }
     }
 
-    await prisma.contacto.delete({ where: { id: lidContact.id } });
-    console.log(`[Auto-Merge] Fusión completada: LID ${lidTelefono} unido a real ${realTelefono}`);
-  } catch (e) {
-    console.error("[Auto-Merge] Error durante la fusión de contactos:", e);
+    // En lugar de eliminar el contacto LID, dejarlo como marcador para futuras redirecciones
+    await prisma.contacto.update({
+      where: { id: lidContact.id },
+      data: { nombre: `MERGED_TO:${realTelefono}` }
+    });
+
+    console.log(`[Auto-Merge] Fusionado y marcado: LID ${lidTelefono} en ${realTelefono}`);
+  } catch (err) {
+    console.error(`[Auto-Merge] Error uniendo ${lidTelefono} a ${realTelefono}:`, err.message);
   }
 };
 

@@ -63,8 +63,11 @@ const mergeContactos = async (req, res) => {
       }
     }
 
-    // Delete source contact
-    await prisma.contacto.delete({ where: { id: sourceId } });
+    // Instead of deleting, mark it
+    await prisma.contacto.update({ 
+      where: { id: sourceId },
+      data: { nombre: `MERGED_TO:${targetContact.telefono}` }
+    });
 
     // Update lidMap.json if source was a LID
     if (sourceContact.telefono.endsWith('@lid') && !targetContact.telefono.endsWith('@lid')) {

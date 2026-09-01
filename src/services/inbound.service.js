@@ -202,6 +202,14 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         where: { telefono }
       });
 
+      // NOVEDAD: Leer el mapeo persistente directo desde la Base de Datos
+      if (contacto && contacto.nombre && contacto.nombre.startsWith('MERGED_TO:')) {
+        const realTelefono = contacto.nombre.replace('MERGED_TO:', '').trim();
+        console.log(`[LID DEBUG] DB Redirect: ${telefono} -> ${realTelefono}`);
+        telefono = realTelefono;
+        contacto = await prisma.contacto.findUnique({ where: { telefono } });
+      }
+
       // Si el JID es @lid y no encontramos el contacto por teléfono,
       // buscar por pushName para evitar crear duplicados
       if (!contacto && isLid && telefono.includes('@lid') && msg.pushName) {
