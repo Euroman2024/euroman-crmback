@@ -143,7 +143,61 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         console.log(JSON.stringify(msg, null, 2));
       }
 
-      // 1. Lógica de Contacto (Auto-creación)
+      // 1. Extraer contenido y archivos PRIMERO para descartar mensajes de sistema sin contenido
+      // Primero desenvolver cualquier capa especial de WhatsApp (viewOnce, ephemeral, etc.)
+      const realMsg = extractRealMessage(msg.message);
+      let contenido = realMsg?.conversation || realMsg?.extendedTextMessage?.text || 
+                      msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+      let archivoUrl = null;
+      let mimetype = null;
+
+      const mediaType = getMediaType(realMsg);
+      const isMedia = !!mediaType;
+
+      if (isMedia) {
+        try {
+          mimetype = realMsg[mediaType]?.mimetype || '';
+          
+          // Leer el caption (texto que acompaña a la imagen/video/documento)
+          const caption = realMsg[mediaType]?.caption || '';
+          if (caption && !contenido) {
+            contenido = caption;
+          }
+          
+          // downloadMediaMessage necesita el msg original (con la clave del wrapper intacta)
+          const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: { level: 'silent', ...console, trace: () => {}, debug: () => {} } });
+          
+          if (buffer && buffer.length > 0) {
+            // Generar nombre único con extensión correcta
+            const ext = mimetypeToExt(mimetype);
+            const filename = `${uuidv4()}.${ext}`;
+            const uploadDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+            
+            // Crear la carpeta si no existe
+            if (!fs.existsSync(uploadDir)) {
+              fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            
+            const filepath = path.join(uploadDir, filename);
+            fs.writeFileSync(filepath, buffer);
+            archivoUrl = `/uploads/${filename}`;
+            console.log(`[Media] Guardado: ${filename} (${mimetype}, ${buffer.length} bytes)`);
+          } else {
+            console.warn(`[Media] Buffer vacío para ${mediaType}, omitiendo archivo.`);
+          }
+          
+          // Solo poner [image]/[video]/etc si no hay caption ni texto previo
+          if (!contenido) contenido = `[${mediaType.replace('Message', '')}]`;
+        } catch (e) {
+          console.error(`[Media] Error al procesar multimedia:`, e);
+          if (!contenido) contenido = `[Error adjunto]`;
+        }
+      }
+
+      // 2. Descartar el mensaje si NO TIENE CONTENIDO (mensajes de sistema, sincronizaciones, etc)
+      if (!contenido && !archivoUrl && !isMedia) continue;
+
+      // 3. Lógica de Contacto (Auto-creación)
       let contacto = await prisma.contacto.findUnique({
         where: { telefono }
       });
@@ -154,8 +208,8 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         const byName = await prisma.contacto.findFirst({
           where: {
             OR: [
-              { nombre: msg.pushName },
-              { nombre: `~${msg.pushName}` }
+              { nombre: { contains: msg.pushName, mode: 'insensitive' } },
+              { nombre: { contains: `~${msg.pushName}`, mode: 'insensitive' } }
             ],
             telefono: { endsWith: '@s.whatsapp.net' }
           }
@@ -163,7 +217,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         if (byName) {
           // Guardar el mapeo @lid -> @s.whatsapp.net para mensajes futuros
           try {
-            const mapPath = path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+            const mapPath = process.env.UPLOADS_DIR ? path.join(process.env.UPLOADS_DIR, 'lidMap.json') : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
             const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
             lidMap[telefono] = byName.telefono;
             fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
@@ -211,62 +265,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         });
       }
 
-      // Mover la creación de conversación más abajo
-
-      // Extraer contenido y archivos
-      // Primero desenvolver cualquier capa especial de WhatsApp (viewOnce, ephemeral, etc.)
-      const realMsg = extractRealMessage(msg.message);
-      let contenido = realMsg?.conversation || realMsg?.extendedTextMessage?.text || 
-                      msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-      let archivoUrl = null;
-      let mimetype = null;
-
-      const mediaType = getMediaType(realMsg);
-      const isMedia = !!mediaType;
-      
-      if (isMedia) {
-        try {
-          mimetype = realMsg[mediaType]?.mimetype || '';
-          
-          // Leer el caption (texto que acompaña a la imagen/video/documento)
-          const caption = realMsg[mediaType]?.caption || '';
-          if (caption && !contenido) {
-            contenido = caption;
-          }
-          
-          // downloadMediaMessage necesita el msg original (con la clave del wrapper intacta)
-          const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: { level: 'silent', ...console, trace: () => {}, debug: () => {} } });
-          
-          if (buffer && buffer.length > 0) {
-            // Generar nombre único con extensión correcta
-            const ext = mimetypeToExt(mimetype);
-            const filename = `${uuidv4()}.${ext}`;
-            const uploadDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
-            
-            // Crear la carpeta si no existe
-            if (!fs.existsSync(uploadDir)) {
-              fs.mkdirSync(uploadDir, { recursive: true });
-            }
-            
-            const filepath = path.join(uploadDir, filename);
-            fs.writeFileSync(filepath, buffer);
-            archivoUrl = `/uploads/${filename}`;
-            console.log(`[Media] Guardado: ${filename} (${mimetype}, ${buffer.length} bytes)`);
-          } else {
-            console.warn(`[Media] Buffer vacío para ${mediaType}, omitiendo archivo.`);
-          }
-          
-          // Solo poner [image]/[video]/etc si no hay caption ni texto previo
-          if (!contenido) contenido = `[${mediaType.replace('Message', '')}]`;
-        } catch (err) {
-          console.error(`[Media] Error descargando ${mediaType}:`, err.message);
-          if (!contenido) contenido = `[${mediaType?.replace('Message', '') || 'archivo'}]`;
-        }
-      }
-
-      if (!contenido && !archivoUrl) continue;
-
-      // 2. Lógica de Conversación (upsert atómico: la BD garantiza que nunca
+      // 4. Lógica de Conversación (upsert atómico: la BD garantiza que nunca
       // se creen dos conversaciones para el mismo contacto+cuenta, incluso
       // si dos mensajes llegan casi al mismo tiempo)
       let conversacion = await prisma.conversacion.upsert({
