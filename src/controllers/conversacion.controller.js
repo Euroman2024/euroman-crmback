@@ -29,6 +29,12 @@ const getConversaciones = async (req, res) => {
       where: {
         mensajes: {
           some: {}
+        },
+        // Excluir conversaciones de contactos marcados como MERGED_TO (contactos fantasma)
+        contacto: {
+          NOT: {
+            nombre: { startsWith: 'MERGED_TO:' }
+          }
         }
       },
       include: {
@@ -43,6 +49,32 @@ const getConversaciones = async (req, res) => {
           orderBy: { createdAt: 'desc' },
           take: 1 // Último mensaje para mostrar en la lista (snippet)
         }
+      }
+    });
+
+    // Auto-heal en segundo plano: si hay conversaciones de MERGED_TO, moverlas al contacto real
+    setImmediate(async () => {
+      try {
+        const mergedWithConvs = await prisma.contacto.findMany({
+          where: { nombre: { startsWith: 'MERGED_TO:' }, conversaciones: { some: {} } },
+          include: { conversaciones: true }
+        });
+        for (const mc of mergedWithConvs) {
+          const realTelefono = mc.nombre.replace('MERGED_TO:', '').trim();
+          const real = await prisma.contacto.findUnique({ where: { telefono: realTelefono }, include: { conversaciones: true } });
+          if (!real || real.nombre?.startsWith('MERGED_TO:')) continue;
+          for (const c of mc.conversaciones) {
+            const rc = real.conversaciones.find(x => x.whatsappAccountId === c.whatsappAccountId);
+            if (rc) {
+              await prisma.mensaje.updateMany({ where: { conversacionId: c.id }, data: { conversacionId: rc.id } });
+              await prisma.conversacion.delete({ where: { id: c.id } });
+            } else {
+              await prisma.conversacion.update({ where: { id: c.id }, data: { contactoId: real.id } });
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Auto-heal] Error:', e.message);
       }
     });
 
