@@ -370,30 +370,46 @@ const editMessage = async (req, res) => {
 const deleteMessage = async (req, res) => {
   try {
     const { mensajeId } = req.params;
-    const { forEveryone = true } = req.body;
+    // forEveryone=true: además de quitarlo del CRM, se revoca en WhatsApp (solo
+    // válido para mensajes que TÚ enviaste; WhatsApp no permite borrar del
+    // teléfono un mensaje que envió el cliente). Cualquier otro valor: solo se
+    // quita del CRM, el mensaje sigue intacto en WhatsApp.
+    const forEveryone = req.body?.forEveryone === true;
 
     const mensaje = await prisma.mensaje.findUnique({ where: { id: mensajeId } });
     if (!mensaje) return res.status(404).json({ message: "Mensaje no encontrado" });
 
-    // Eliminar en WhatsApp si es posible
-    try {
+    if (forEveryone) {
+      if (mensaje.tipo !== 'outgoing') {
+        return res.status(403).json({ message: "No se puede eliminar para todos un mensaje del cliente. Solo se puede eliminar de tu CRM." });
+      }
+      if (!mensaje.whatsappMsgId) {
+        return res.status(400).json({ message: "Este mensaje no tiene un ID de WhatsApp válido para eliminarlo en el teléfono." });
+      }
+
       const conversacion = await prisma.conversacion.findUnique({
         where: { id: mensaje.conversacionId },
         include: { contacto: true, whatsappAccount: true }
       });
-      if (conversacion && conversacion.whatsappAccount.estado === 'conectado' && mensaje.whatsappMsgId) {
-        const sock = whatsappService.getSession(conversacion.whatsappAccountId);
-        const jid = conversacion.contacto.telefono.includes('@') ? conversacion.contacto.telefono : `${conversacion.contacto.telefono}@s.whatsapp.net`;
-        if (sock) {
-          await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: true, id: mensaje.whatsappMsgId } });
-        }
+      const sock = conversacion ? whatsappService.getSession(conversacion.whatsappAccountId) : null;
+
+      if (!conversacion || conversacion.whatsappAccount.estado !== 'conectado' || !sock) {
+        return res.status(400).json({ message: "La línea de WhatsApp no está conectada; no se puede eliminar para todos ahora mismo." });
       }
-    } catch (e) { console.error("Error borrando en WA:", e.message); }
+
+      const jid = conversacion.contacto.telefono.includes('@') ? conversacion.contacto.telefono : `${conversacion.contacto.telefono}@s.whatsapp.net`;
+      try {
+        await sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: true, id: mensaje.whatsappMsgId } });
+      } catch (e) {
+        console.error("Error eliminando en WhatsApp:", e.message);
+        return res.status(502).json({ message: "No se pudo eliminar el mensaje en WhatsApp (puede que ya sea muy antiguo)." });
+      }
+    }
 
     await prisma.mensaje.delete({ where: { id: mensajeId } });
 
     try { getIO().emit('message_deleted', { mensajeId, conversacionId: mensaje.conversacionId }); } catch (e) {}
-    res.status(200).json({ message: "Mensaje eliminado" });
+    res.status(200).json({ message: forEveryone ? "Mensaje eliminado para todos" : "Mensaje eliminado para ti" });
   } catch (error) {
     console.error("Error al eliminar mensaje:", error);
     res.status(500).json({ message: "Error interno al eliminar" });
