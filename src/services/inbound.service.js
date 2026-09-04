@@ -116,63 +116,48 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
       let telefono = `${idPart.split(':')[0]}@${domainPart}`;
       const isLid = domainPart === 'lid';
 
-      // Resolve LID to real phone if mapped
+      // Resolver LID -> número real usando ÚNICAMENTE identificadores únicos,
+      // nunca por nombre (dos clientes distintos pueden llamarse igual).
+      // 1) Caché local ya confirmada (lidMap.json)
+      // 2) Mapeo oficial y nativo de Baileys/WhatsApp (sock.signalRepository.lidMapping)
       if (isLid) {
-        console.log(`[LID DEBUG] Incoming LID message from: ${telefono}`);
+        const mapPath = process.env.UPLOADS_DIR ? path.join(process.env.UPLOADS_DIR, 'lidMap.json') : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
+        let resuelto = null;
+
         try {
-          const mapPath = process.env.UPLOADS_DIR ? path.join(process.env.UPLOADS_DIR, 'lidMap.json') : path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
-          console.log(`[LID DEBUG] Checking lidMap at: ${mapPath}`);
           if (fs.existsSync(mapPath)) {
             const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-            if (lidMap[telefono]) {
-              console.log(`[LID DEBUG] Successfully mapped ${telefono} to ${lidMap[telefono]}`);
-              telefono = lidMap[telefono];
-            } else {
-              console.log(`[LID DEBUG] No mapping found in lidMap.json for ${telefono}`);
-            }
-          } else {
-            console.log(`[LID DEBUG] lidMap.json does NOT exist at ${mapPath}`);
+            if (lidMap[telefono]) resuelto = lidMap[telefono];
           }
         } catch (e) {
-          console.error("[LID DEBUG] Error resolving lid mapping", e);
+          console.error('[LID] Error leyendo lidMap.json:', e.message);
         }
-      }
 
-      if (isLid && telefono.includes('@lid')) {
-        console.log("UNMAPPED LID MESSAGE RECEIVED! Raw payload:");
-        console.log(JSON.stringify(msg, null, 2));
+        if (!resuelto && sock?.signalRepository?.lidMapping) {
+          try {
+            const pn = await sock.signalRepository.lidMapping.getPNForLID(remoteJid);
+            if (pn) resuelto = pn;
+          } catch (e) {
+            console.error('[LID] Error consultando mapeo nativo de Baileys:', e.message);
+          }
+        }
+
+        if (resuelto) {
+          telefono = resuelto;
+          try {
+            const uploadDir = path.dirname(mapPath);
+            if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+            const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
+            lidMap[remoteJid] = resuelto;
+            fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
+          } catch (e) {}
+        }
       }
 
       // 1. Lógica de Contacto (Auto-creación)
       let contacto = await prisma.contacto.findUnique({
         where: { telefono }
       });
-
-      // Si el JID es @lid y no encontramos el contacto por teléfono,
-      // buscar por pushName para evitar crear duplicados
-      if (!contacto && isLid && telefono.includes('@lid') && msg.pushName) {
-        const byName = await prisma.contacto.findFirst({
-          where: {
-            OR: [
-              { nombre: msg.pushName },
-              { nombre: `~${msg.pushName}` }
-            ],
-            telefono: { endsWith: '@s.whatsapp.net' }
-          }
-        });
-        if (byName) {
-          // Guardar el mapeo @lid -> @s.whatsapp.net para mensajes futuros
-          try {
-            const mapPath = path.join(__dirname, '..', '..', 'public', 'uploads', 'lidMap.json');
-            const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
-            lidMap[telefono] = byName.telefono;
-            fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
-          } catch (e) {}
-          // Usar el contacto existente con número real
-          contacto = byName;
-          telefono = byName.telefono;
-        }
-      }
 
       if (!contacto) {
         try {

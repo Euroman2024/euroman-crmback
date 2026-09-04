@@ -39,6 +39,16 @@ server.listen(PORT, '0.0.0.0', async () => {
     // cleanup-duplicates.js puede no exportar la función si se ejecuta como script
   }
 
+  // Repetir la fusión cada 5 minutos: por si llega un mensaje nuevo desde un
+  // @lid antes de que WhatsApp confirme el número real (evita que un mismo
+  // cliente aparezca como dos chats distintos de forma permanente).
+  setInterval(() => {
+    try {
+      const { mergeDuplicates } = require('../cleanup-duplicates');
+      if (mergeDuplicates) mergeDuplicates().catch(err => console.error('Error en fusión periódica de LIDs:', err.message));
+    } catch (err) {}
+  }, 5 * 60 * 1000);
+
   // Iniciar todas las sesiones guardadas
   await whatsappService.restoreSessions();
 
