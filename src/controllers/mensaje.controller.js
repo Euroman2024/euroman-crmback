@@ -239,13 +239,22 @@ const sendMedia = async (req, res) => {
 
 const forwardMessage = async (req, res) => {
   try {
-    const { sourceMessageId, targetConversacionIds } = req.body;
-    if (!sourceMessageId || !targetConversacionIds || !targetConversacionIds.length) {
-      return res.status(400).json({ message: "Se requiere mensaje origen y al menos un chat destino" });
+    const { sourceMessageId, sourceMessageIds, targetConversacionIds } = req.body;
+    // Compatibilidad: acepta un solo mensaje (sourceMessageId, como antes) o
+    // varios a la vez (sourceMessageIds) para reenviar en bloque.
+    const idsSolicitados = (sourceMessageIds && sourceMessageIds.length)
+      ? sourceMessageIds
+      : (sourceMessageId ? [sourceMessageId] : []);
+
+    if (!idsSolicitados.length || !targetConversacionIds || !targetConversacionIds.length) {
+      return res.status(400).json({ message: "Se requiere al menos un mensaje origen y un chat destino" });
     }
 
-    const sourceMessage = await prisma.mensaje.findUnique({ where: { id: sourceMessageId } });
-    if (!sourceMessage) return res.status(404).json({ message: "Mensaje origen no encontrado" });
+    const sourceMessagesRaw = await prisma.mensaje.findMany({ where: { id: { in: idsSolicitados } } });
+    if (!sourceMessagesRaw.length) return res.status(404).json({ message: "Mensaje(s) origen no encontrado(s)" });
+
+    // Reenviar respetando el orden cronológico original, no el orden de selección
+    const sourceMessages = [...sourceMessagesRaw].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
     // Send to each target conversation
     for (const conversacionId of targetConversacionIds) {
@@ -261,62 +270,64 @@ const forwardMessage = async (req, res) => {
       const sock = whatsappService.getSession(whatsappAccountId);
       if (!sock) continue;
 
-      let messageContent = {};
-      
-      // If it has media, read it from disk
-      if (sourceMessage.archivoUrl) {
-        // Use UPLOADS_DIR env var if set (Railway persistent volume), otherwise fallback to public folder
-        const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
-        // archivoUrl is like "/uploads/filename.jpg", so strip the "/uploads/" prefix
-        const fileName = sourceMessage.archivoUrl.replace(/^\/uploads\//, '');
-        const filePath = path.join(uploadsDir, fileName);
-        if (fs.existsSync(filePath)) {
-          const buffer = fs.readFileSync(filePath);
-          const mimeType = sourceMessage.mimetype || 'application/octet-stream';
-          if (mimeType.startsWith('image/')) {
-            messageContent = { image: buffer, caption: sourceMessage.contenido || '' };
-          } else if (mimeType.startsWith('video/')) {
-            messageContent = { video: buffer, caption: sourceMessage.contenido || '' };
-          } else if (mimeType.startsWith('audio/')) {
-            messageContent = { audio: buffer, ptt: false };
+      for (const sourceMessage of sourceMessages) {
+        let messageContent = {};
+
+        // If it has media, read it from disk
+        if (sourceMessage.archivoUrl) {
+          // Use UPLOADS_DIR env var if set (Railway persistent volume), otherwise fallback to public folder
+          const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+          // archivoUrl is like "/uploads/filename.jpg", so strip the "/uploads/" prefix
+          const fileName = sourceMessage.archivoUrl.replace(/^\/uploads\//, '');
+          const filePath = path.join(uploadsDir, fileName);
+          if (fs.existsSync(filePath)) {
+            const buffer = fs.readFileSync(filePath);
+            const mimeType = sourceMessage.mimetype || 'application/octet-stream';
+            if (mimeType.startsWith('image/')) {
+              messageContent = { image: buffer, caption: sourceMessage.contenido || '' };
+            } else if (mimeType.startsWith('video/')) {
+              messageContent = { video: buffer, caption: sourceMessage.contenido || '' };
+            } else if (mimeType.startsWith('audio/')) {
+              messageContent = { audio: buffer, ptt: false };
+            } else {
+              messageContent = { document: buffer, fileName: fileName, mimetype: mimeType, caption: sourceMessage.contenido || '' };
+            }
           } else {
-            messageContent = { document: buffer, fileName: fileName, mimetype: mimeType, caption: sourceMessage.contenido || '' };
+            // Fallback to text if file is missing on disk
+            messageContent = { text: sourceMessage.contenido || 'Archivo reenviado no disponible' };
           }
         } else {
-          // Fallback to text if file is missing on disk
-          messageContent = { text: sourceMessage.contenido || 'Archivo reenviado no disponible' };
+          messageContent = { text: sourceMessage.contenido };
         }
-      } else {
-        messageContent = { text: sourceMessage.contenido };
+
+        // Do NOT pass { forward: true } — that bypasses the actual media buffer and only re-sends the original WA key
+        const sentMsg = await sock.sendMessage(jid, messageContent);
+
+        const nuevoMensaje = await prisma.mensaje.create({
+          data: {
+            conversacionId,
+            whatsappMsgId: sentMsg?.key?.id,
+            contenido: sourceMessage.contenido || '',
+            archivoUrl: sourceMessage.archivoUrl,
+            mimetype: sourceMessage.mimetype,
+            tipo: 'outgoing'
+          }
+        });
+
+        try {
+          getIO().emit('message_sent', {
+            conversacionId,
+            mensaje: nuevoMensaje,
+            contacto,
+            whatsappAccountId
+          });
+        } catch (e) {}
       }
-
-      // Do NOT pass { forward: true } — that bypasses the actual media buffer and only re-sends the original WA key
-      const sentMsg = await sock.sendMessage(jid, messageContent);
-
-      const nuevoMensaje = await prisma.mensaje.create({
-        data: {
-          conversacionId,
-          whatsappMsgId: sentMsg?.key?.id,
-          contenido: sourceMessage.contenido || '',
-          archivoUrl: sourceMessage.archivoUrl,
-          mimetype: sourceMessage.mimetype,
-          tipo: 'outgoing'
-        }
-      });
 
       await prisma.conversacion.update({
         where: { id: conversacionId },
         data: { estado: 'respondido' }
       });
-
-      try {
-        getIO().emit('message_sent', {
-          conversacionId,
-          mensaje: nuevoMensaje,
-          contacto,
-          whatsappAccountId
-        });
-      } catch (e) {}
     }
 
     res.status(200).json({ message: "Mensajes reenviados correctamente" });
