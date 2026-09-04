@@ -81,6 +81,7 @@ model Mensaje {
   quotedMensajeId String?
   quotedContenido String?
   editado         Boolean  @default(false)
+  eliminado       Boolean  @default(false)
 
   createdAt DateTime @default(now())
 

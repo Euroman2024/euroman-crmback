@@ -114,6 +114,36 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         continue;
       }
 
+      // Alguien (cliente o nosotros desde el teléfono) eliminó un mensaje para
+      // todos: reflejarlo también en el CRM con el aviso "Se eliminó este mensaje".
+      if (msg.message.protocolMessage?.type === 'REVOKE') {
+        const revokedId = msg.message.protocolMessage.key?.id;
+        if (revokedId) {
+          try {
+            const objetivo = await prisma.mensaje.findUnique({ where: { whatsappMsgId: revokedId } });
+            if (objetivo && !objetivo.eliminado) {
+              if (objetivo.archivoUrl) {
+                try {
+                  const uploadDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+                  const filePath = path.join(uploadDir, objetivo.archivoUrl.replace(/^\/uploads\//, ''));
+                  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                } catch (e) {}
+              }
+              await prisma.mensaje.update({
+                where: { id: objetivo.id },
+                data: { eliminado: true, contenido: '', archivoUrl: null, mimetype: null }
+              });
+              try {
+                getIO().emit('message_deleted', { mensajeId: objetivo.id, conversacionId: objetivo.conversacionId, eliminadoParaTodos: true });
+              } catch (e) {}
+            }
+          } catch (e) {
+            console.error('[Revoke] Error procesando eliminación entrante:', e.message);
+          }
+        }
+        continue;
+      }
+
       // Evitar duplicados
       const existingMessage = await prisma.mensaje.findUnique({
         where: { whatsappMsgId }

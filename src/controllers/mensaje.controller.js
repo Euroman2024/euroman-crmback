@@ -404,12 +404,34 @@ const deleteMessage = async (req, res) => {
         console.error("Error eliminando en WhatsApp:", e.message);
         return res.status(502).json({ message: "No se pudo eliminar el mensaje en WhatsApp (puede que ya sea muy antiguo)." });
       }
+
+      // Eliminar para todos: dejamos la fila (con aviso "Se eliminó este
+      // mensaje") en vez de borrarla, igual que hace WhatsApp en ambos lados.
+      if (mensaje.archivoUrl) {
+        try {
+          const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'public', 'uploads');
+          const filePath = path.join(uploadsDir, mensaje.archivoUrl.replace(/^\/uploads\//, ''));
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } catch (e) { console.error("Error borrando archivo adjunto:", e.message); }
+      }
+
+      await prisma.mensaje.update({
+        where: { id: mensajeId },
+        data: { eliminado: true, contenido: '', archivoUrl: null, mimetype: null }
+      });
+
+      try {
+        getIO().emit('message_deleted', { mensajeId, conversacionId: mensaje.conversacionId, eliminadoParaTodos: true });
+      } catch (e) {}
+
+      return res.status(200).json({ message: "Mensaje eliminado para todos" });
     }
 
+    // Eliminar solo para mí: se borra de la fila del CRM, WhatsApp queda intacto.
     await prisma.mensaje.delete({ where: { id: mensajeId } });
 
-    try { getIO().emit('message_deleted', { mensajeId, conversacionId: mensaje.conversacionId }); } catch (e) {}
-    res.status(200).json({ message: forEveryone ? "Mensaje eliminado para todos" : "Mensaje eliminado para ti" });
+    try { getIO().emit('message_deleted', { mensajeId, conversacionId: mensaje.conversacionId, eliminadoParaTodos: false }); } catch (e) {}
+    res.status(200).json({ message: "Mensaje eliminado para ti" });
   } catch (error) {
     console.error("Error al eliminar mensaje:", error);
     res.status(500).json({ message: "Error interno al eliminar" });
