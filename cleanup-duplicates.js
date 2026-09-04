@@ -16,6 +16,14 @@ const whatsappService = require('./src/services/whatsapp.service');
 const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'public', 'uploads');
 const mapPath = path.join(uploadsDir, 'lidMap.json');
 
+// Quita el sufijo de dispositivo (":0", ":12", etc.) que Baileys a veces
+// incluye en los JID internos, igual que en inbound.service.js.
+const normalizeJid = (jid) => {
+  if (!jid || typeof jid !== 'string') return jid;
+  const [idPart, domainPart] = jid.split('@');
+  return `${idPart.split(':')[0]}@${domainPart}`;
+};
+
 function saveLidMapping(lidTelefono, realTelefono) {
   try {
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -36,7 +44,7 @@ async function resolveLidNatively(lidTelefono, accountIds) {
     if (!sock?.signalRepository?.lidMapping) continue;
     try {
       const pn = await sock.signalRepository.lidMapping.getPNForLID(lidTelefono);
-      if (pn) return pn;
+      if (pn) return normalizeJid(pn);
     } catch (e) {
       // Ignorar y probar con la siguiente cuenta
     }
@@ -60,7 +68,7 @@ async function mergeDuplicates() {
       try {
         if (fs.existsSync(mapPath)) {
           const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-          if (lidMap[c.telefono]) realTelefono = lidMap[c.telefono];
+          if (lidMap[c.telefono]) realTelefono = normalizeJid(lidMap[c.telefono]);
         }
       } catch (e) {}
 

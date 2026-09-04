@@ -5,6 +5,15 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
+// Quita el sufijo de dispositivo (":0", ":12", etc.) que Baileys a veces
+// incluye en los JID internos. Sin esto, el mismo número real puede quedar
+// guardado dos veces ("593...@s.whatsapp.net" y "593...:0@s.whatsapp.net").
+const normalizeJid = (jid) => {
+  if (!jid || typeof jid !== 'string') return jid;
+  const [idPart, domainPart] = jid.split('@');
+  return `${idPart.split(':')[0]}@${domainPart}`;
+};
+
 const formatPhoneForDisplay = (value) => {
   const digits = String(value || '').replace(/\D/g, '');
   if (!digits) return '';
@@ -127,7 +136,7 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         try {
           if (fs.existsSync(mapPath)) {
             const lidMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-            if (lidMap[telefono]) resuelto = lidMap[telefono];
+            if (lidMap[telefono]) resuelto = normalizeJid(lidMap[telefono]);
           }
         } catch (e) {
           console.error('[LID] Error leyendo lidMap.json:', e.message);
@@ -143,12 +152,12 @@ const handleIncomingMessage = async (accountId, messageUpsert, sock) => {
         }
 
         if (resuelto) {
-          telefono = resuelto;
+          telefono = normalizeJid(resuelto);
           try {
             const uploadDir = path.dirname(mapPath);
             if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
             const lidMap = fs.existsSync(mapPath) ? JSON.parse(fs.readFileSync(mapPath, 'utf8')) : {};
-            lidMap[remoteJid] = resuelto;
+            lidMap[remoteJid] = telefono;
             fs.writeFileSync(mapPath, JSON.stringify(lidMap, null, 2));
           } catch (e) {}
         }
