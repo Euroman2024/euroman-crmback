@@ -11,7 +11,16 @@ const contactoRoutes = require("./routes/contacto.routes");
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGINS || 'https://euroman-crmfront-two.vercel.app,http://localhost:5173,http://localhost:3000')
+  .split(',')
+  .map(o => o.trim());
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Permite peticiones sin origin (curl, apps móviles, Postman)
+    callback(null, !origin || allowedOrigins.includes(origin));
+  }
+}));
 
 app.use(express.json());
 

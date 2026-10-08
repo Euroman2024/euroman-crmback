@@ -6,7 +6,7 @@ const register = async (req, res) => {
 
   try {
 
-    const { nombre, email, password } = req.body;
+    const { nombre, email, password, rol } = req.body;
 
     const userExists = await prisma.usuario.findUnique({
       where: {
@@ -28,7 +28,7 @@ const register = async (req, res) => {
         nombre,
         email,
         password: hashedPassword,
-        rol: 'admin'
+        rol: rol === 'admin' ? 'admin' : 'vendedor'
       }
     });
 
